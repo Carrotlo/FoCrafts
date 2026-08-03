@@ -1,0 +1,60 @@
+# Public custom crafting GUI.
+# Slots are 0-based. Inventory rows must be 1-6. Invalid slots/materials fall back safely.
+# Titles are rendered small caps in code to match Fo GUI style.
+# Common item keys: slot, material, amount, name, lore, custom-model-data, glow, flags.
+
+title: "Custom Crafting"
+rows: 6
+
+# The 3x3 input grid. Must contain exactly 9 valid slots.
+grid-slots:
+  - 10
+  - 11
+  - 12
+  - 19
+  - 20
+  - 21
+  - 28
+  - 29
+  - 30
+
+result-slot: 24
+
+filler:
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+
+items:
+  browse-recipes:
+    slot: 49
+    material: BOOK
+    name: "{theme}Browse Recipes"
+    lore:
+      - "{white}Open the recipe browser."
+
+result-items:
+  no-match:
+    material: GRAY_DYE
+    name: "{muted}No matching recipe"
+    lore:
+      - "{white}Place items in the grid to craft."
+  locked:
+    material: BARRIER
+    name: "{bad}Locked recipe"
+    lore:
+      - "{white}Missing permission:"
+      - "{theme}{permission}"
+  world-blocked:
+    material: BARRIER
+    name: "{bad}World restricted"
+    lore:
+      - "{white}Cannot craft this recipe in"
+      - "{theme}{world}"
+
+# Applied to the real result item when the grid matches a recipe.
+# Valid placeholders: {recipe_id}, {recipe_name}, {max_craftable}, {cost}, {permission}.
+result-item:
+  lore:
+    - "{white}Costs: {theme}{cost}"
+    - "{white}Click to Craft"
+    - "{white}Shift Click to Craft Multiple"

@@ -1,0 +1,37 @@
+name: FoCrafts
+description: Custom crafting and recipe editor plugin
+version: '${project.version}'
+
+main: me.foesio.foCrafts.FoCrafts
+api-version: '1.21'
+softdepend: [ Vault ]
+
+authors: [ Carrotio ]
+
+commands:
+  craft:
+    description: Opens the custom crafting GUI
+    usage: /craft
+    aliases: [focrafts]
+    permission: focrafts.use
+  recipes:
+    description: Opens the custom recipes GUI
+    usage: /recipes
+    aliases: [forecipes]
+    permission: focrafts.use
+  focraftsadmin:
+    description: FoCrafts admin command
+    usage: /focraftsadmin <version|editor|reload>
+    aliases: [craftadmin]
+    permission: focrafts.admin
+
+permissions:
+  focrafts.use:
+    description: Allows using FoCrafts user GUIs
+    default: true
+  focrafts.admin:
+    description: Allows using FoCrafts admin editor
+    default: op
+  focrafts.recipe.*:
+    description: Grants access to all custom recipe permission nodes
+    default: op

@@ -1,0 +1,78 @@
+# Public custom recipes browser GUI.
+# Slots are 0-based. Inventory rows must be 1-6. Invalid slots/materials fall back safely.
+# Titles are rendered small caps in code to match Fo GUI style.
+# Common item keys: slot, material, amount, name, lore, custom-model-data, glow, flags.
+
+title: "Custom Recipes"
+rows: 6
+
+# Dynamic recipe entries render in these slots.
+content-slots:
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 19
+  - 20
+  - 21
+  - 22
+  - 23
+  - 24
+  - 25
+  - 28
+  - 29
+  - 30
+  - 31
+  - 32
+  - 33
+  - 34
+
+filler:
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+
+empty-content:
+  material: LIGHT_GRAY_STAINED_GLASS_PANE
+  name: " "
+
+items:
+  previous-page:
+    slot: 45
+  next-page:
+    slot: 53
+  search:
+    slot: 51
+  clear-search:
+    slot: 52
+  back-to-craft:
+    slot: 49
+  sort:
+    slot: 48
+    material: CLOCK
+    name: "{theme}Sort: {sort}"
+    lore:
+      - "{sort_options}"
+    # Valid placeholder for these lines: {sort}.
+    selected-line: "{theme}» {sort}"
+    unselected-line: "{white}• {sort}"
+
+# Dynamic recipe entry. The real recipe result item is used when available.
+# Valid placeholders: {recipe_id}, {recipe_name}, {description}, {permission}, {type}, {match_mode}, {locked}.
+recipe-item:
+  material: BARRIER
+  name: "{theme}{recipe_name}"
+  lore:
+    - "{description}"
+    - "{locked}"
+    - "{white}Click to view this recipe."
+  description-line: "{white}Desc: {theme}{description}"
+  locked-line: "{bad}Locked: missing permission"
+
+invalid-recipe-item:
+  material: BARRIER
+  name: "{bad}Invalid result"
+  lore:
+    - "{white}This recipe has no valid result item."

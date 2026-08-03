@@ -1,0 +1,22 @@
+# Need help or want support? Join the Discord: https://discord.gg/kEF77QCfu7
+
+recipes:
+  default-sort: "NAME_ASC"
+  show-locked: true
+
+# Uses Minecraft's native dialog/input screens for search and text/number input when supported.
+# Requires a compatible Paper or Paper-fork server with the Dialog API.
+# Spigot and older versions automatically fall back to inventory/chat GUI mode.
+native-dialogs:
+  # Set this to false to always use inventory/chat GUI mode.
+  enabled: true
+
+  # Sends admins a short warning when native dialogs are enabled but unavailable and the plugin falls back.
+  warn-on-fallback: true
+
+# On-craft commands can use these built-in placeholders:
+# {player} -> player name
+# {uuid} -> player UUID
+# {recipe_id} -> recipe id
+# {recipe_name} -> recipe display name
+# {amount} -> crafted result amount for that craft

@@ -1,0 +1,16 @@
+# Native dialog for recipe search prompts.
+# Used only on compatible Paper/Paper-fork servers with native-dialogs.enabled: true.
+# Spigot and older servers use the existing chat prompt.
+# Valid placeholders: {setting}, {current}, {format}.
+title: "{theme}{setting}"
+body:
+  - "{muted}Current query: {theme}{current}"
+  - "{muted}Expected input: {white}{format}"
+field-label: "{white}Search query"
+initial-value: "{current}"
+confirm-button: "{good}Search"
+cancel-button: "{bad}Cancel"
+body-width: 300
+input-width: 300
+button-width: 100
+max-length: 128
