@@ -12,6 +12,10 @@ import me.foesio.core.editor.EditorDialogInputs;
 import me.foesio.core.editor.EditorItemFactory;
 import me.foesio.core.gui.GuiButtonConfig;
 import me.foesio.core.gui.GuiSlots;
+import me.foesio.core.gui.EntryBrowserClick;
+import me.foesio.core.gui.EntryBrowserHolder;
+import me.foesio.core.gui.EntryBrowserMenus;
+import me.foesio.core.gui.EntryBrowserRequest;
 import me.foesio.core.gui.GuiTitles;
 import me.foesio.core.inventory.OverflowPolicy;
 import me.foesio.core.item.FoItemStacks;
@@ -251,46 +255,23 @@ public final class GuiManager implements Listener {
     public void openAdminListGui(Player player, int requestedPage) {
         AdminListState state = getAdminListState(player);
         List<CustomRecipe> recipes = getFilteredAdminRecipes(state);
-        int maxPage = Math.max(0, (recipes.size() - 1) / RECIPE_LIST_SLOTS.length);
-        int page = clampPage(requestedPage, maxPage);
+        List<EntryBrowserRequest.Entry> entries = new ArrayList<>();
+        entries.addAll(recipes.stream()
+                .map(recipe -> EntryBrowserRequest.Entry.of(recipe.getId(), adminRecipeIcon(recipe)))
+                .toList());
 
-        AdminListHolder holder = new AdminListHolder(page, state.search, state.sort);
-        Inventory inventory = Bukkit.createInventory(holder, 54, styleTitle("&8Recipe Editor"));
-        holder.setInventory(inventory);
-
-        fillBackground(inventory, false);
-
-        ItemStack emptyRecipeSlot = emptyRecipeSlotFiller();
-        for (int slot : RECIPE_LIST_SLOTS) {
-            inventory.setItem(slot, emptyRecipeSlot.clone());
-        }
-
-        int start = page * RECIPE_LIST_SLOTS.length;
-        int end = Math.min(start + RECIPE_LIST_SLOTS.length, recipes.size());
-        for (int i = start; i < end; i++) {
-            int slot = RECIPE_LIST_SLOTS[i - start];
-            CustomRecipe recipe = recipes.get(i);
-            inventory.setItem(slot, adminRecipeIcon(recipe));
-        }
-
-        if (page > 0) {
-            inventory.setItem(PAGE_PREVIOUS_SLOT, buttons.previousPage(page, maxPage));
-        }
-        if (page < maxPage) {
-            inventory.setItem(PAGE_NEXT_SLOT, buttons.nextPage(page, maxPage));
-        }
-
-        inventory.setItem(ADMIN_SEARCH_SLOT, buttons.search(state.search));
-        if (!state.search.isBlank()) {
-            inventory.setItem(ADMIN_CLEAR_SEARCH_SLOT, buttons.clearSearch("recipes"));
-        }
-        inventory.setItem(ADMIN_SORT_SLOT, named(Material.CLOCK, "{theme}Sort: " + state.sort.displayName, sortLore(state.sort)));
-        inventory.setItem(ADMIN_CREATE_SLOT, named(Material.ANVIL, "{good}Create Recipe", List.of(
-                "{white}Create a new custom recipe.",
-                "{white}You will name it first."
-        )));
-
-        player.openInventory(inventory);
+        EntryBrowserMenus.open(player, EntryBrowserRequest.builder()
+                .title("Recipe Editor")
+                .entries(entries)
+                .page(requestedPage)
+                .filter(state.search)
+                .buttons(buttons)
+                .extraButton(named(Material.CLOCK, "{theme}Sort: " + state.sort.displayName, sortLore(state.sort)))
+                .addButton(named(Material.ANVIL, "{good}Create Recipe", List.of(
+                        "{white}Create a new custom recipe.",
+                        "{white}You will name it first."
+                )))
+                .build());
     }
 
     private void openRecipePreviewGui(Player player, String recipeId, int returnPage) {
@@ -508,6 +489,10 @@ public final class GuiManager implements Listener {
             handleRecipePreviewClick(event, player, previewHolder);
             return;
         }
+        if (holder instanceof EntryBrowserHolder entryBrowserHolder) {
+            handleAdminEntryBrowserClick(event, player, entryBrowserHolder);
+            return;
+        }
         if (holder instanceof AdminListHolder adminListHolder) {
             handleAdminListClick(event, player, adminListHolder);
             return;
@@ -533,6 +518,11 @@ public final class GuiManager implements Listener {
     public void onInventoryDrag(InventoryDragEvent event) {
         Inventory top = event.getView().getTopInventory();
         InventoryHolder holder = top.getHolder();
+
+        if (holder instanceof EntryBrowserHolder) {
+            event.setCancelled(true);
+            return;
+        }
 
         if (holder instanceof CraftHolder craftHolder) {
             for (int rawSlot : event.getRawSlots()) {
@@ -730,6 +720,34 @@ public final class GuiManager implements Listener {
         if (raw == holder.gui.back().slot()) {
             openRecipeListGui(player, holder.returnPage, holder.returnToCraft);
             return;
+        }
+    }
+
+    private void handleAdminEntryBrowserClick(InventoryClickEvent event, Player player, EntryBrowserHolder holder) {
+        event.setCancelled(true);
+        EntryBrowserClick click = EntryBrowserMenus.handleClick(event.getRawSlot(), holder, event.getClick());
+        AdminListState state = getAdminListState(player);
+        switch (click.action()) {
+            case ENTRY -> {
+                openAdminEditorGui(player, click.entryId(), holder.request().page());
+            }
+            case ADD -> startPrompt(player, PromptType.CREATE_RECIPE_NAME, null, holder.request().page(),
+                    "{theme}Type the new recipe name. Type {bad}cancel {theme}to cancel.");
+            case EXTRA -> {
+                state.sort = state.sort.next();
+                openAdminListGui(player, 0);
+            }
+            case SEARCH -> startPrompt(player, PromptType.ADMIN_SEARCH, null, holder.request().page(),
+                    "{theme}Type admin recipe search query in chat. Type {bad}cancel {theme}to cancel.");
+            case CLEAR_SEARCH -> {
+                state.search = "";
+                messages.send(player, "search-cleared");
+                openAdminListGui(player, 0);
+            }
+            case PREVIOUS_PAGE -> openAdminListGui(player, holder.request().page() - 1);
+            case NEXT_PAGE -> openAdminListGui(player, holder.request().page() + 1);
+            case BACK, NONE -> {
+            }
         }
     }
 
