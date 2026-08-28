@@ -39,6 +39,7 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
             }
             if (!hasUsePermission(player)) {
                 messages.send(sender, "no-permission");
+                plugin.getAdminSounds().updateError(sender);
                 return true;
             }
             guiManager.openCraftGui(player);
@@ -52,6 +53,7 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
             }
             if (!hasUsePermission(player)) {
                 messages.send(player, "no-permission");
+                plugin.getAdminSounds().updateError(sender);
                 return true;
             }
             guiManager.openRecipeListGui(player, 0);
@@ -61,11 +63,13 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
         if (commandName.equals("focraftsadmin")) {
             if (!sender.hasPermission("focrafts.admin")) {
                 messages.send(sender, "no-permission");
+                plugin.getAdminSounds().updateError(sender);
                 return true;
             }
 
             if (args.length == 0) {
                 messages.send(sender, "admin-usage");
+                plugin.getAdminSounds().updateError(sender);
                 return true;
             }
 
@@ -83,6 +87,7 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
                     messages.send(sender, "player-only");
                     return true;
                 }
+                plugin.getEditorSounds().open(player);
                 guiManager.openAdminListGui(player, 0);
                 return true;
             }
@@ -90,10 +95,18 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
             if (args[0].equalsIgnoreCase("reload")) {
                 boolean ok = plugin.reloadPluginData();
                 messages.send(sender, ok ? "reload-success" : "reload-failed");
+                if (sender instanceof Player player) {
+                    if (ok) {
+                        plugin.getAdminSounds().reload(player);
+                    } else {
+                        plugin.getAdminSounds().reloadError(player);
+                    }
+                }
                 return true;
             }
 
             messages.send(sender, "admin-usage");
+            plugin.getAdminSounds().updateError(sender);
             return true;
         }
 

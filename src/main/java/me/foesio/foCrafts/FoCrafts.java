@@ -8,6 +8,10 @@ import me.foesio.core.message.FoMessageService;
 import me.foesio.core.message.FoStyle;
 import me.foesio.core.reload.FoReloadRegistry;
 import me.foesio.core.reload.FoReloadResult;
+import me.foesio.core.sound.FoAdminSounds;
+import me.foesio.core.sound.FoEditorSounds;
+import me.foesio.core.sound.FoGuiSounds;
+import me.foesio.core.sound.FoSoundService;
 import me.foesio.core.update.UpdateNoticeService;
 import me.foesio.foCrafts.command.FoCraftsCommand;
 import me.foesio.foCrafts.config.GuiConfig;
@@ -23,6 +27,10 @@ public final class FoCrafts extends JavaPlugin {
     private static final int BSTATS_PLUGIN_ID = 33054;
 
     private FoCoreContext core;
+    private FoSoundService sounds;
+    private FoAdminSounds adminSounds;
+    private FoEditorSounds editorSounds;
+    private FoGuiSounds guiSounds;
     private UpdateNoticeService updateNotices;
     private RecipeManager recipeManager;
     private FoMessageService messageService;
@@ -37,7 +45,7 @@ public final class FoCrafts extends JavaPlugin {
 
         refreshCoreContext();
         this.messageService = FoMessageService.load(this, messageMigrations());
-        this.updateNotices = core.createUpdateNotices(messageService, MODRINTH_PROJECT_ID).start();
+        this.updateNotices = core.createUpdateNotices(messageService, MODRINTH_PROJECT_ID, adminSounds).start();
         this.recipeManager = new RecipeManager(this);
         this.recipeManager.load();
         this.vaultHook = new VaultHook(this);
@@ -91,6 +99,22 @@ public final class FoCrafts extends JavaPlugin {
         return core;
     }
 
+    public FoGuiSounds getGuiSounds() {
+        return guiSounds;
+    }
+
+    public FoSoundService getSounds() {
+        return sounds;
+    }
+
+    public FoEditorSounds getEditorSounds() {
+        return editorSounds;
+    }
+
+    public FoAdminSounds getAdminSounds() {
+        return adminSounds;
+    }
+
     private void registerCommand(String commandName, FoCraftsCommand handler) {
         PluginCommand command = getCommand(commandName);
         if (command == null) {
@@ -111,6 +135,10 @@ public final class FoCrafts extends JavaPlugin {
             core.close();
         }
         core = FoPluginCore.create(this);
+        sounds = core.createSounds();
+        adminSounds = FoAdminSounds.create(sounds);
+        editorSounds = FoEditorSounds.create(sounds);
+        guiSounds = FoGuiSounds.create(sounds);
         core.metrics(BSTATS_PLUGIN_ID);
         core.warnIfNativeDialogsUnavailable();
     }

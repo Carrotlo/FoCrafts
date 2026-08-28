@@ -30,6 +30,7 @@ import me.foesio.core.selector.TriStateSelectionState;
 import me.foesio.core.selector.TriStateSelections;
 import me.foesio.core.selector.WorldSelectionEntries;
 import me.foesio.foCrafts.config.GuiConfig;
+import me.foesio.foCrafts.FoCrafts;
 import me.foesio.foCrafts.config.GuiConfig.CustomCraftingGui;
 import me.foesio.foCrafts.config.GuiConfig.CustomRecipesGui;
 import me.foesio.foCrafts.config.GuiConfig.GuiButtonSlot;
@@ -126,7 +127,7 @@ public final class GuiManager implements Listener {
         ADMIN_RECIPE_ITEMS_EDITABLE_SLOTS.add(ADMIN_RECIPE_ITEMS_RESULT_SLOT);
     }
 
-    private final JavaPlugin plugin;
+    private final FoCrafts plugin;
     private final RecipeManager recipeManager;
     private final FoMessageService messages;
     private final GuiConfig guiConfig;
@@ -142,7 +143,7 @@ public final class GuiManager implements Listener {
     private final Map<UUID, WorldSelectionSession> worldSelectionSessions = new HashMap<>();
     private DialogService dialogService;
 
-    public GuiManager(JavaPlugin plugin, RecipeManager recipeManager, FoMessageService messages, GuiConfig guiConfig, VaultHook vaultHook, Supplier<FoCoreContext> coreSupplier) {
+    public GuiManager(FoCrafts plugin, RecipeManager recipeManager, FoMessageService messages, GuiConfig guiConfig, VaultHook vaultHook, Supplier<FoCoreContext> coreSupplier) {
         this.plugin = plugin;
         this.recipeManager = recipeManager;
         this.messages = messages;
@@ -198,10 +199,12 @@ public final class GuiManager implements Listener {
     }
 
     public void openCraftGui(Player player) {
+        plugin.getGuiSounds().open(player);
         openCraftGui(player, null, false);
     }
 
     public void openRecipeListGui(Player player, int requestedPage) {
+        plugin.getGuiSounds().open(player);
         openRecipeListGui(player, requestedPage, false);
     }
 
@@ -635,8 +638,10 @@ public final class GuiManager implements Listener {
             int amount = event.isShiftClick() ? Integer.MAX_VALUE : 1;
             CraftAttempt attempt = attemptCraft(player, top, amount);
             if (attempt.crafted > 0) {
+                plugin.getSounds().play(player, "craft.success");
                 messages.send(player, "craft-success", Map.of("amount", String.valueOf(attempt.crafted)));
             } else {
+                plugin.getSounds().play(player, "craft.error");
                 sendCraftFailure(player, attempt);
             }
             refreshCraftPreview(player, top);
@@ -644,6 +649,7 @@ public final class GuiManager implements Listener {
         }
 
         if (raw == gui.browseRecipes().slot()) {
+            plugin.getGuiSounds().open(player);
             openRecipeListGui(player, 0, true);
             return;
         }
@@ -670,41 +676,49 @@ public final class GuiManager implements Listener {
         if (recipeSlotIndex >= 0) {
             int index = holder.page * pageSize + recipeSlotIndex;
             if (index < recipes.size()) {
+                plugin.getGuiSounds().open(player);
                 openRecipePreviewGui(player, recipes.get(index).getId(), holder.page, holder.returnToCraft);
             }
             return;
         }
 
         if (raw == gui.previousPage().slot() && holder.page > 0) {
+            plugin.getGuiSounds().previousPage(player);
             openRecipeListGui(player, holder.page - 1, holder.returnToCraft);
             return;
         }
         if (raw == gui.nextPage().slot() && holder.page < maxPage) {
+            plugin.getGuiSounds().nextPage(player);
             openRecipeListGui(player, holder.page + 1, holder.returnToCraft);
             return;
         }
         if (raw == gui.search().slot()) {
             if (event.getClick().isRightClick()) {
                 state.search = "";
+                plugin.getGuiSounds().clearSearch(player);
                 messages.send(player, "search-cleared");
                 openRecipeListGui(player, 0, holder.returnToCraft);
                 return;
             }
+            plugin.getGuiSounds().search(player);
             startPrompt(player, PromptType.PLAYER_SEARCH, null, holder.page, "{theme}Type recipe search query in chat. Type {bad}cancel {theme}to cancel.", holder.returnToCraft);
             return;
         }
         if (raw == gui.clearSearch().slot() && !state.search.isBlank()) {
             state.search = "";
+            plugin.getGuiSounds().clearSearch(player);
             messages.send(player, "search-cleared");
             openRecipeListGui(player, 0, holder.returnToCraft);
             return;
         }
         if (raw == gui.backToCraft().slot() && holder.returnToCraft) {
-            openCraftGui(player);
+            plugin.getGuiSounds().back(player);
+            openCraftGui(player, null, false);
             return;
         }
         if (raw == gui.sort().slot()) {
             state.sort = state.sort.next();
+            plugin.getGuiSounds().sort(player);
             openRecipeListGui(player, 0, holder.returnToCraft);
             return;
         }
@@ -718,6 +732,7 @@ public final class GuiManager implements Listener {
         }
 
         if (raw == holder.gui.back().slot()) {
+            plugin.getGuiSounds().back(player);
             openRecipeListGui(player, holder.returnPage, holder.returnToCraft);
             return;
         }
@@ -729,23 +744,35 @@ public final class GuiManager implements Listener {
         AdminListState state = getAdminListState(player);
         switch (click.action()) {
             case ENTRY -> {
+                plugin.getEditorSounds().open(player);
                 openAdminEditorGui(player, click.entryId(), holder.request().page());
             }
             case ADD -> startPrompt(player, PromptType.CREATE_RECIPE_NAME, null, holder.request().page(),
                     "{theme}Type the new recipe name. Type {bad}cancel {theme}to cancel.");
             case EXTRA -> {
                 state.sort = state.sort.next();
+                plugin.getEditorSounds().cycle(player);
                 openAdminListGui(player, 0);
             }
-            case SEARCH -> startPrompt(player, PromptType.ADMIN_SEARCH, null, holder.request().page(),
-                    "{theme}Type admin recipe search query in chat. Type {bad}cancel {theme}to cancel.");
+            case SEARCH -> {
+                plugin.getEditorSounds().search(player);
+                startPrompt(player, PromptType.ADMIN_SEARCH, null, holder.request().page(),
+                        "{theme}Type admin recipe search query in chat. Type {bad}cancel {theme}to cancel.");
+            }
             case CLEAR_SEARCH -> {
                 state.search = "";
+                plugin.getEditorSounds().clearSearch(player);
                 messages.send(player, "search-cleared");
                 openAdminListGui(player, 0);
             }
-            case PREVIOUS_PAGE -> openAdminListGui(player, holder.request().page() - 1);
-            case NEXT_PAGE -> openAdminListGui(player, holder.request().page() + 1);
+            case PREVIOUS_PAGE -> {
+                plugin.getEditorSounds().previousPage(player);
+                openAdminListGui(player, holder.request().page() - 1);
+            }
+            case NEXT_PAGE -> {
+                plugin.getEditorSounds().nextPage(player);
+                openAdminListGui(player, holder.request().page() + 1);
+            }
             case BACK, NONE -> {
             }
         }
@@ -766,37 +793,44 @@ public final class GuiManager implements Listener {
         if (recipeSlotIndex >= 0) {
             int index = holder.page * RECIPE_LIST_SLOTS.length + recipeSlotIndex;
             if (index < recipes.size()) {
+                plugin.getEditorSounds().open(player);
                 openAdminEditorGui(player, recipes.get(index).getId(), holder.page);
             }
             return;
         }
 
         if (raw == PAGE_PREVIOUS_SLOT && holder.page > 0) {
+            plugin.getEditorSounds().previousPage(player);
             openAdminListGui(player, holder.page - 1);
             return;
         }
         if (raw == PAGE_NEXT_SLOT && holder.page < maxPage) {
+            plugin.getEditorSounds().nextPage(player);
             openAdminListGui(player, holder.page + 1);
             return;
         }
         if (raw == ADMIN_SEARCH_SLOT) {
             if (event.getClick().isRightClick()) {
                 state.search = "";
+                plugin.getEditorSounds().clearSearch(player);
                 messages.send(player, "search-cleared");
                 openAdminListGui(player, 0);
                 return;
             }
+            plugin.getEditorSounds().search(player);
             startPrompt(player, PromptType.ADMIN_SEARCH, null, holder.page, "{theme}Type admin recipe search query in chat. Type {bad}cancel {theme}to cancel.");
             return;
         }
         if (raw == ADMIN_CLEAR_SEARCH_SLOT && !state.search.isBlank()) {
             state.search = "";
+            plugin.getEditorSounds().clearSearch(player);
             messages.send(player, "search-cleared");
             openAdminListGui(player, 0);
             return;
         }
         if (raw == ADMIN_SORT_SLOT) {
             state.sort = state.sort.next();
+            plugin.getEditorSounds().cycle(player);
             openAdminListGui(player, 0);
             return;
         }
@@ -814,6 +848,7 @@ public final class GuiManager implements Listener {
         }
 
         if (raw == DELETE_CONFIRM_CANCEL_SLOT) {
+            plugin.getEditorSounds().back(player);
             if (holder.editorInventory != null) {
                 player.openInventory(holder.editorInventory);
             } else {
@@ -829,8 +864,10 @@ public final class GuiManager implements Listener {
     private void deleteRecipeAndReturn(Player player, String recipeId, int returnPage) {
         boolean deleted = recipeManager.delete(recipeId);
         if (deleted) {
+            plugin.getEditorSounds().delete(player);
             messages.send(player, "admin-deleted", Map.of("id", recipeId));
         } else {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "recipe-missing");
         }
         openAdminListGui(player, returnPage);
@@ -895,11 +932,13 @@ public final class GuiManager implements Listener {
         }
         if (raw == ADMIN_EDITOR_ITEMS_SLOT) {
             event.setCancelled(true);
+            plugin.getEditorSounds().open(player);
             openAdminRecipeItemsGui(player, recipe.getId(), holder.returnPage);
             return;
         }
         if (raw == ADMIN_EDITOR_WORLDS_SLOT) {
             event.setCancelled(true);
+            plugin.getEditorSounds().open(player);
             openDisabledWorldSelector(player, recipe, holder.returnPage);
             return;
         }
@@ -908,6 +947,7 @@ public final class GuiManager implements Listener {
             event.setCancelled(true);
             recipe.setType(recipe.getType() == RecipeType.SHAPED ? RecipeType.SHAPELESS : RecipeType.SHAPED);
             recipeManager.upsert(recipe);
+            plugin.getEditorSounds().cycle(player);
             refreshAdminEditorMeta(top, recipe);
             messages.send(player, "admin-type-changed", Map.of("type", recipe.getType().name()));
             return;
@@ -917,6 +957,7 @@ public final class GuiManager implements Listener {
             event.setCancelled(true);
             recipe.setMatchMode(nextMatchMode(recipe.getMatchMode()));
             recipeManager.upsert(recipe);
+            plugin.getEditorSounds().cycle(player);
             refreshAdminEditorMeta(top, recipe);
             messages.send(player, "admin-match-mode-changed", Map.of("mode", recipe.getMatchMode().name()));
             return;
@@ -926,6 +967,7 @@ public final class GuiManager implements Listener {
             event.setCancelled(true);
             recipe.setEnabled(!recipe.isEnabled());
             recipeManager.upsert(recipe);
+            plugin.getEditorSounds().toggle(player, recipe.isEnabled());
             refreshAdminEditorMeta(top, recipe);
             messages.send(player, recipe.isEnabled() ? "admin-enabled" : "admin-disabled");
             return;
@@ -933,12 +975,14 @@ public final class GuiManager implements Listener {
 
         if (raw == ADMIN_EDITOR_DELETE_SLOT) {
             event.setCancelled(true);
+            plugin.getEditorSounds().open(player);
             openDeleteConfirmation(player, holder.recipeId, holder.returnPage, top);
             return;
         }
 
         if (raw == ADMIN_EDITOR_BACK_SLOT) {
             event.setCancelled(true);
+            plugin.getEditorSounds().back(player);
             openAdminListGui(player, holder.returnPage);
             return;
         }
@@ -963,6 +1007,7 @@ public final class GuiManager implements Listener {
         if (raw == ADMIN_RECIPE_ITEMS_BACK_SLOT) {
             event.setCancelled(true);
             autoSaveRecipeItems(top, holder.recipeId);
+            plugin.getEditorSounds().back(player);
             openAdminEditorGui(player, holder.recipeId, holder.returnPage);
             return;
         }
@@ -991,6 +1036,7 @@ public final class GuiManager implements Listener {
         }
         if (action == TriStateSelectionActionType.BACK) {
             worldSelectionSessions.remove(player.getUniqueId());
+            plugin.getEditorSounds().back(player);
             openAdminEditorGui(player, session.recipeId(), session.returnPage());
             return;
         }
@@ -998,9 +1044,18 @@ public final class GuiManager implements Listener {
             startWorldSelectionSearch(player, session, holder.request());
             return;
         }
-        if (action == TriStateSelectionActionType.CLEAR_SEARCH
-                || action == TriStateSelectionActionType.PREVIOUS_PAGE
-                || action == TriStateSelectionActionType.NEXT_PAGE) {
+        if (action == TriStateSelectionActionType.CLEAR_SEARCH) {
+            plugin.getEditorSounds().clearSearch(player);
+            openWorldSelection(player, session, click.nextRequest());
+            return;
+        }
+        if (action == TriStateSelectionActionType.PREVIOUS_PAGE) {
+            plugin.getEditorSounds().previousPage(player);
+            openWorldSelection(player, session, click.nextRequest());
+            return;
+        }
+        if (action == TriStateSelectionActionType.NEXT_PAGE) {
+            plugin.getEditorSounds().nextPage(player);
             openWorldSelection(player, session, click.nextRequest());
             return;
         }
@@ -1040,6 +1095,7 @@ public final class GuiManager implements Listener {
     private void saveWorldSelection(Player player, WorldSelectionSession session, TriStateSelectionRequest request) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(session.recipeId());
         if (optional.isEmpty()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "recipe-missing");
             worldSelectionSessions.remove(player.getUniqueId());
             openAdminListGui(player, session.returnPage());
@@ -1050,6 +1106,7 @@ public final class GuiManager implements Listener {
         CustomRecipe recipe = optional.get();
         recipe.setDisabledWorlds(disabledWorlds);
         recipeManager.upsert(recipe);
+        plugin.getEditorSounds().cycle(player);
         messages.send(player, "admin-disabled-worlds-updated", Map.of("amount", String.valueOf(disabledWorlds.size())));
         openWorldSelection(player, session, request);
     }
@@ -1068,15 +1125,20 @@ public final class GuiManager implements Listener {
                 formatRequest(searchDialogRequest("{current}", "{format}"), replacements),
                 input -> {
                     if (input.equalsIgnoreCase("cancel")) {
+                        plugin.getEditorSounds().back(player);
                         openWorldSelection(player, session, request);
                         return;
                     }
                     openWorldSelection(player, session, request.withFilter(input.trim()));
                 },
-                () -> openWorldSelection(player, session, request)
+                () -> {
+                    plugin.getEditorSounds().back(player);
+                    openWorldSelection(player, session, request);
+                }
         );
         if (openedNative) {
             textFallback.clearHint(player);
+            plugin.getEditorSounds().open(player);
         }
     }
 
@@ -2047,6 +2109,7 @@ public final class GuiManager implements Listener {
         );
         if (openedNative) {
             textFallback.clearHint(player);
+            plugin.getEditorSounds().open(player);
         }
     }
 
@@ -2237,6 +2300,7 @@ public final class GuiManager implements Listener {
     }
 
     private void cancelPrompt(Player player, ChatPrompt prompt) {
+        plugin.getEditorSounds().back(player);
         messages.send(player, "chat-prompt-cancelled");
         reopenPromptOrigin(player, prompt);
     }
@@ -2270,6 +2334,7 @@ public final class GuiManager implements Listener {
     private void createRecipeFromPrompt(Player player, ChatPrompt prompt, String input) {
         String name = input.trim();
         if (name.isBlank()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "chat-prompt-invalid");
             reopenPromptOrigin(player, prompt);
             return;
@@ -2285,6 +2350,7 @@ public final class GuiManager implements Listener {
                 new LinkedHashMap<>()
         );
         recipeManager.upsert(recipe);
+        plugin.getEditorSounds().add(player);
         messages.send(player, "admin-created", Map.of("id", recipeId));
         openAdminEditorGui(player, recipeId, prompt.returnPage);
     }
@@ -2292,6 +2358,7 @@ public final class GuiManager implements Listener {
     private void handleNamePrompt(Player player, ChatPrompt prompt, String input) {
         String name = input.trim();
         if (name.isBlank()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "chat-prompt-invalid");
             reopenPromptOrigin(player, prompt);
             return;
@@ -2299,11 +2366,13 @@ public final class GuiManager implements Listener {
 
         Optional<CustomRecipe> renamed = recipeManager.renameRecipe(prompt.recipeId, name);
         if (renamed.isEmpty()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "recipe-missing");
             return;
         }
 
         CustomRecipe recipe = renamed.get();
+        plugin.getEditorSounds().save(player);
         messages.send(player, "admin-name-updated", Map.of("id", recipe.getId()));
         refreshOpenEditorIfMatching(player, recipe, prompt);
     }
@@ -2311,11 +2380,13 @@ public final class GuiManager implements Listener {
     private void updateRecipeTextField(Player player, ChatPrompt prompt, String input, RecipeTextUpdater updater, String successKey) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "recipe-missing");
             return;
         }
         String value = input.trim();
         if (value.isBlank()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "chat-prompt-invalid");
             reopenPromptOrigin(player, prompt);
             return;
@@ -2323,6 +2394,7 @@ public final class GuiManager implements Listener {
         CustomRecipe recipe = optional.get();
         updater.update(recipe, value);
         recipeManager.upsert(recipe);
+        plugin.getEditorSounds().save(player);
         messages.send(player, successKey);
         refreshOpenEditorIfMatching(player, recipe, prompt);
     }
@@ -2330,6 +2402,7 @@ public final class GuiManager implements Listener {
     private void handlePermissionPrompt(Player player, ChatPrompt prompt, String input) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "recipe-missing");
             return;
         }
@@ -2340,6 +2413,7 @@ public final class GuiManager implements Listener {
         CustomRecipe recipe = optional.get();
         recipe.setPermission(value);
         recipeManager.upsert(recipe);
+        plugin.getEditorSounds().save(player);
         messages.send(player, "admin-permission-updated");
         refreshOpenEditorIfMatching(player, recipe, prompt);
     }
@@ -2347,6 +2421,7 @@ public final class GuiManager implements Listener {
     private void handleDescriptionPrompt(Player player, ChatPrompt prompt, String input) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "recipe-missing");
             return;
         }
@@ -2357,6 +2432,7 @@ public final class GuiManager implements Listener {
         CustomRecipe recipe = optional.get();
         recipe.setDescription(value);
         recipeManager.upsert(recipe);
+        plugin.getEditorSounds().save(player);
         messages.send(player, "admin-description-updated");
         refreshOpenEditorIfMatching(player, recipe, prompt);
     }
@@ -2364,12 +2440,14 @@ public final class GuiManager implements Listener {
     private void handleCostPrompt(Player player, ChatPrompt prompt, String input) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "recipe-missing");
             return;
         }
 
         String[] split = input.trim().split("\\s+");
         if (split.length != 3) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "chat-prompt-invalid");
             reopenPromptOrigin(player, prompt);
             return;
@@ -2380,6 +2458,7 @@ public final class GuiManager implements Listener {
             int points = Integer.parseInt(split[1]);
             double money = Double.parseDouble(split[2]);
             if (levels < 0 || points < 0 || money < 0) {
+                plugin.getEditorSounds().error(player);
                 messages.send(player, "chat-prompt-invalid");
                 reopenPromptOrigin(player, prompt);
                 return;
@@ -2388,9 +2467,11 @@ public final class GuiManager implements Listener {
             CustomRecipe recipe = optional.get();
             recipe.setCost(new RecipeCost(levels, points, money));
             recipeManager.upsert(recipe);
+            plugin.getEditorSounds().save(player);
             messages.send(player, "admin-cost-updated");
             refreshOpenEditorIfMatching(player, recipe, prompt);
         } catch (NumberFormatException ignored) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "chat-prompt-invalid");
             reopenPromptOrigin(player, prompt);
         }
@@ -2399,6 +2480,7 @@ public final class GuiManager implements Listener {
     private void handleCommandsPrompt(Player player, ChatPrompt prompt, String input) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
+            plugin.getEditorSounds().error(player);
             messages.send(player, "recipe-missing");
             return;
         }
@@ -2423,6 +2505,7 @@ public final class GuiManager implements Listener {
         CustomRecipe recipe = optional.get();
         recipe.setCraftCommands(commands);
         recipeManager.upsert(recipe);
+        plugin.getEditorSounds().save(player);
         messages.send(player, "admin-commands-updated", Map.of("amount", String.valueOf(commands.size())));
         refreshOpenEditorIfMatching(player, recipe, prompt);
     }

@@ -13,17 +13,14 @@ commands:
     description: Opens the custom crafting GUI
     usage: /craft
     aliases: [focrafts]
-    permission: focrafts.use
   recipes:
     description: Opens the custom recipes GUI
     usage: /recipes
     aliases: [forecipes]
-    permission: focrafts.use
   focraftsadmin:
     description: FoCrafts admin command
     usage: /focraftsadmin <version|editor|reload>
     aliases: [craftadmin]
-    permission: focrafts.admin
 
 permissions:
   focrafts.use:
