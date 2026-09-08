@@ -1,5 +1,7 @@
+# Edit optional item icons here. Remove any :icon: token to hide it.
+# Unsupported servers, older Java clients, and Bedrock players automatically receive clean text without item sprites.
 tokens:
-  prefix: "{theme}FoCrafts &8» {muted}"
+  prefix: ":crafting_table: {theme}FoCrafts &8» {muted}"
   theme: "#03fc88"
   muted: "#a7b8b0"
   white: "#ffffff"
@@ -10,23 +12,22 @@ no-permission: "{prefix}{bad}You do not have permission."
 player-only: "{prefix}{bad}Only players can use this command."
 
 admin-usage: "{prefix}{muted}Usage: {theme}/focraftsadmin <version|editor|reload>"
-admin-version: "{prefix}{muted}Author: {theme}{author}{muted} | Version: {theme}{version}"
 
-reload-success: "{prefix}{good}Reloaded config, messages, and recipes."
-reload-failed: "{prefix}{bad}Reload failed. Check server console."
+reload-success: "{prefix}:emerald: {good}Reloaded config, messages, and recipes."
+reload-failed: "{prefix}:redstone: {bad}Reload failed. Check server console."
 
 recipe-missing: "{prefix}{bad}That recipe no longer exists."
 recipe-inserted: "{prefix}{good}Inserted available ingredients into the craft grid."
 
 craft-no-match: "{prefix}{bad}No matching custom recipe in the grid."
-craft-success: "{prefix}{good}Crafted {theme}{amount}{good} item(s)."
+craft-success: "{prefix}:crafting_table: {good}Crafted {theme}{amount}{good} item(s)."
 craft-no-recipe-permission: "{prefix}{bad}You are missing permission: {theme}{permission}"
 craft-world-blocked: "{prefix}{bad}This recipe is blocked in world {theme}{world}"
 craft-cooldown: "{prefix}{bad}You must wait {theme}{seconds}{bad}s before crafting this recipe again."
 craft-cost-xp: "{prefix}{bad}Not enough XP. Required levels: {theme}{levels}{bad}, points: {theme}{points}"
 craft-cost-money: "{prefix}{bad}Not enough money. Required: {theme}${money}"
 craft-cost-vault-missing: "{prefix}{bad}Vault economy is not available for this recipe."
-craft-cost-failed: "{prefix}{bad}Could not charge recipe cost."
+craft-cost-failed: "{prefix}:redstone: {bad}Could not charge recipe cost."
 
 search-cleared: "{prefix}{muted}Search query cleared."
 chat-prompt-start: "{prefix}{muted}{hint}"
@@ -34,14 +35,14 @@ chat-prompt-cancelled: "{prefix}{muted}Chat prompt cancelled."
 chat-prompt-invalid: "{prefix}{bad}Invalid input format."
 native-dialogs-fallback: "{prefix}{bad}Native dialogs are not supported on this server. Using chat input."
 
-admin-created: "{prefix}{good}Created recipe {theme}{id}{good}. Configure it in the editor."
+admin-created: "{prefix}:emerald: {good}Created recipe {theme}{id}{good}. Configure it in the editor."
 admin-cloned: "{prefix}{good}Cloned recipe as {theme}{id}{good}."
 admin-enabled: "{prefix}{good}Recipe is now enabled."
 admin-disabled: "{prefix}{bad}Recipe is now disabled."
 admin-type-changed: "{prefix}{muted}Recipe type set to {theme}{type}{muted}."
 admin-match-mode-changed: "{prefix}{muted}Match mode set to {theme}{mode}{muted}."
-admin-deleted: "{prefix}{bad}Deleted recipe {theme}{id}{bad}."
-admin-unsaved-warning: "{prefix}{bad}You have unsaved editor changes. Close again to discard them."
+admin-deleted: "{prefix}:lava_bucket: {bad}Deleted recipe {theme}{id}{bad}."
+admin-unsaved-warning: "{prefix}:redstone: {bad}You have unsaved editor changes. Close again to discard them."
 
 admin-name-updated: "{prefix}{good}Recipe name and ID updated to {theme}{id}{good}."
 admin-description-updated: "{prefix}{good}Recipe description updated."

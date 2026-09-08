@@ -45,6 +45,7 @@ public final class FoCrafts extends JavaPlugin {
 
         refreshCoreContext();
         this.messageService = FoMessageService.load(this, messageMigrations());
+        migrateSprites();
         this.updateNotices = core.createUpdateNotices(messageService, MODRINTH_PROJECT_ID, adminSounds).start();
         this.recipeManager = new RecipeManager(this);
         this.recipeManager.load();
@@ -147,6 +148,21 @@ public final class FoCrafts extends JavaPlugin {
         return FoMessageMigrations.create()
                 .add(this::migrateLegacyMessageStyle)
                 .build();
+    }
+
+    private void migrateSprites() {
+        messageService.migrateToVersion(core.migrations(), 1, config -> {
+            boolean changed = false;
+            changed |= FoMessageService.addMissingToken(config, "tokens.prefix", ":crafting_table:", null);
+            changed |= FoMessageService.addMissingToken(config, "reload-success", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "reload-failed", ":redstone:");
+            changed |= FoMessageService.addMissingToken(config, "craft-success", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "craft-cost-failed", ":redstone:");
+            changed |= FoMessageService.addMissingToken(config, "admin-created", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "admin-deleted", ":lava_bucket:");
+            changed |= FoMessageService.addMissingToken(config, "admin-unsaved-warning", ":redstone:");
+            return true;
+        });
     }
 
     private boolean migrateLegacyMessageStyle(FileConfiguration messages) {

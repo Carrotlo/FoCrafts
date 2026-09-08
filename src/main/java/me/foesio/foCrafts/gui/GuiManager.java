@@ -5,11 +5,13 @@ import me.foesio.core.command.CommandPlaceholders;
 import me.foesio.core.dialog.ConfirmationDialogRequest;
 import me.foesio.core.dialog.ConfiguredTextDialogs;
 import me.foesio.core.dialog.DialogButton;
+import me.foesio.core.dialog.DialogIcons;
 import me.foesio.core.dialog.DialogService;
 import me.foesio.core.dialog.FallbackDialogService;
 import me.foesio.core.dialog.TextDialogRequest;
 import me.foesio.core.editor.EditorDialogInputs;
 import me.foesio.core.editor.EditorItemFactory;
+import me.foesio.core.gui.FoButtonStyle;
 import me.foesio.core.gui.GuiButtonConfig;
 import me.foesio.core.gui.GuiSlots;
 import me.foesio.core.gui.EntryBrowserClick;
@@ -21,6 +23,7 @@ import me.foesio.core.inventory.OverflowPolicy;
 import me.foesio.core.item.FoItemStacks;
 import me.foesio.core.message.FoMessageService;
 import me.foesio.core.message.FoStyle;
+import me.foesio.core.text.FoText;
 import me.foesio.core.selector.TriStateSelectionActionType;
 import me.foesio.core.selector.TriStateSelectionClick;
 import me.foesio.core.selector.TriStateSelectionHolder;
@@ -232,18 +235,18 @@ public final class GuiManager implements Listener {
         }
 
         if (page > 0) {
-            placeButton(inventory, gui.previousPage(), buttons.previousPage(page, maxPage));
+            placeButton(inventory, gui.previousPage(), buttons.previousPage(player, page, maxPage));
         }
         if (page < maxPage) {
-            placeButton(inventory, gui.nextPage(), buttons.nextPage(page, maxPage));
+            placeButton(inventory, gui.nextPage(), buttons.nextPage(player, page, maxPage));
         }
 
-        placeButton(inventory, gui.search(), buttons.search(state.search));
+        placeButton(inventory, gui.search(), buttons.search(player, state.search));
         if (!state.search.isBlank()) {
-            placeButton(inventory, gui.clearSearch(), buttons.clearSearch("recipes"));
+            placeButton(inventory, gui.clearSearch(), buttons.clearSearch(player, "recipes"));
         }
         if (returnToCraft) {
-            placeButton(inventory, gui.backToCraft(), buttons.back());
+            placeButton(inventory, gui.backToCraft(), buttons.back(player));
         }
         placeItem(inventory, gui.sort(), Map.of(
                 "sort", state.sort.displayName,
@@ -252,7 +255,7 @@ public final class GuiManager implements Listener {
                 "max_page", String.valueOf(maxPage + 1)
         ), Map.of("sort_options", sortOptionLines(gui, state.sort)));
 
-        player.openInventory(inventory);
+        openForViewer(player, inventory);
     }
 
     public void openAdminListGui(Player player, int requestedPage) {
@@ -269,11 +272,11 @@ public final class GuiManager implements Listener {
                 .page(requestedPage)
                 .filter(state.search)
                 .buttons(buttons)
-                .extraButton(named(Material.CLOCK, "{theme}Sort: " + state.sort.displayName, sortLore(state.sort)))
-                .addButton(named(Material.ANVIL, "{good}Create Recipe", List.of(
+                .extraButton(button(player, Material.CLOCK, "{theme}Sort", sortLore(state.sort), "cycle recipe sort"))
+                .addButton(button(player, Material.ANVIL, "{good}Create Recipe", List.of(
                         "{white}Create a new custom recipe.",
                         "{white}You will name it first."
-                )))
+                ), "create a recipe"))
                 .build());
     }
 
@@ -303,9 +306,9 @@ public final class GuiManager implements Listener {
 
         placeItem(inventory, gui.details(), recipePreviewPlaceholders(gui, player, recipe),
                 Map.of("description", descriptionExpansion(gui.descriptionLine(), recipe)));
-        placeButton(inventory, gui.back(), buttons.back());
+        placeButton(inventory, gui.back(), buttons.back(player));
 
-        player.openInventory(inventory);
+        openForViewer(player, inventory);
     }
 
     private void openAdminEditorGui(Player player, String recipeId, int returnPage) {
@@ -322,9 +325,9 @@ public final class GuiManager implements Listener {
         holder.setInventory(inventory);
 
         fillBackground(inventory, false);
-        refreshAdminEditorMeta(inventory, recipe);
+        refreshAdminEditorMeta(player, inventory, recipe);
 
-        player.openInventory(inventory);
+        openForViewer(player, inventory);
     }
 
     private void openAdminRecipeItemsGui(Player player, String recipeId, int returnPage) {
@@ -343,9 +346,9 @@ public final class GuiManager implements Listener {
         fillBackground(inventory);
         placeRecipeInGrid(inventory, recipe);
         inventory.setItem(ADMIN_RECIPE_ITEMS_RESULT_SLOT, recipe.getResult());
-        inventory.setItem(ADMIN_RECIPE_ITEMS_BACK_SLOT, buttons.back());
+        inventory.setItem(ADMIN_RECIPE_ITEMS_BACK_SLOT, buttons.back(player));
 
-        player.openInventory(inventory);
+        openForViewer(player, inventory);
     }
 
     private void openDeleteConfirmGui(Player player, String recipeId, int returnPage, Inventory editorInventory) {
@@ -365,17 +368,17 @@ public final class GuiManager implements Listener {
                 "{bad}This permanently deletes the recipe.",
                 "{muted}You cannot undo this action."
         )));
-        inventory.setItem(DELETE_CONFIRM_CANCEL_SLOT, EditorItemFactory.cancel());
-        inventory.setItem(DELETE_CONFIRM_CONFIRM_SLOT, named(Material.RED_CONCRETE, "{bad}Confirm Delete", List.of(
+        inventory.setItem(DELETE_CONFIRM_CANCEL_SLOT, EditorItemFactory.cancel(player));
+        inventory.setItem(DELETE_CONFIRM_CONFIRM_SLOT, button(player, Material.RED_CONCRETE, "{bad}Confirm Delete", List.of(
                 "{white}Delete this recipe now.",
                 "{bad}This cannot be undone."
-        )));
+        ), "confirm deletion"));
 
-        player.openInventory(inventory);
+        openForViewer(player, inventory);
     }
 
     private void openDeleteConfirmation(Player player, String recipeId, int returnPage, Inventory editorInventory) {
-        if (currentCore().nativeDialogs().canUseNativeDialogs()) {
+        if (currentCore().nativeDialogs().canUseNativeDialogs(player)) {
             ConfirmationDialogRequest request = new ConfirmationDialogRequest(
                     FoStyle.BAD + GuiTitles.smallCaps("Delete Recipe"),
                     List.of(
@@ -406,22 +409,22 @@ public final class GuiManager implements Listener {
         openDeleteConfirmGui(player, recipeId, returnPage, editorInventory);
     }
 
-    private void refreshAdminEditorMeta(Inventory inventory, CustomRecipe recipe) {
+    private void refreshAdminEditorMeta(Player player, Inventory inventory, CustomRecipe recipe) {
         String permission = recipe.getPermission().isBlank() ? "(none)" : recipe.getPermission();
-        inventory.setItem(ADMIN_EDITOR_RENAME_SLOT, named(Material.NAME_TAG, "{theme}Name", List.of(
+        inventory.setItem(ADMIN_EDITOR_RENAME_SLOT, button(player, Material.NAME_TAG, "{theme}Name", List.of(
                 "{white}Current: {theme}" + recipe.getDisplayName(),
                 "{white}ID: {theme}" + recipe.getId(),
                 "{white}Click to edit in chat."
-        )));
-        inventory.setItem(ADMIN_EDITOR_PERMISSION_SLOT, named(Material.TRIPWIRE_HOOK, "{theme}Permission", List.of(
+        ), "edit recipe name"));
+        inventory.setItem(ADMIN_EDITOR_PERMISSION_SLOT, button(player, Material.TRIPWIRE_HOOK, "{theme}Permission", List.of(
                 "{white}Current: {theme}" + permission,
                 "{white}Click to edit in chat."
-        )));
-        inventory.setItem(ADMIN_EDITOR_COST_SLOT, named(Material.GOLD_INGOT, "{theme}Costs", List.of(
+        ), "edit recipe permission"));
+        inventory.setItem(ADMIN_EDITOR_COST_SLOT, button(player, Material.GOLD_INGOT, "{theme}Costs", List.of(
                 "{white}Current: {theme}" + formatCost(recipe.getCost()),
                 "{white}Click to edit in chat.",
                 "{white}Format: levels points money"
-        )));
+        ), "edit recipe costs"));
         List<String> commandLore = new ArrayList<>();
         commandLore.add("{white}Commands: {theme}" + recipe.getCraftCommands().size());
         commandLore.add("{white}Click to edit in chat.");
@@ -438,19 +441,20 @@ public final class GuiManager implements Listener {
                 commandLore.add("{muted}- ...");
             }
         }
-        inventory.setItem(ADMIN_EDITOR_COMMANDS_SLOT, named(Material.COMMAND_BLOCK, "{theme}On-Craft Commands", commandLore));
+        inventory.setItem(ADMIN_EDITOR_COMMANDS_SLOT, button(player, Material.COMMAND_BLOCK, "{theme}On-Craft Commands", commandLore,
+                "edit on-craft commands"));
 
-        inventory.setItem(ADMIN_EDITOR_WORLDS_SLOT, EditorItemFactory.worlds(0, recipe.getDisabledWorlds().size(), "Allowed"));
-        inventory.setItem(ADMIN_EDITOR_DESCRIPTION_SLOT, named(Material.PAPER, "{theme}Description", List.of(
+        inventory.setItem(ADMIN_EDITOR_WORLDS_SLOT, EditorItemFactory.worlds(player, 0, recipe.getDisabledWorlds().size(), "Allowed"));
+        inventory.setItem(ADMIN_EDITOR_DESCRIPTION_SLOT, button(player, Material.PAPER, "{theme}Description", List.of(
                 "{white}Current: {theme}" + (recipe.getDescription().isBlank() ? "(none)" : recipe.getDescription()),
                 "{white}Click to edit in chat."
-        )));
-        inventory.setItem(ADMIN_EDITOR_ITEMS_SLOT, named(Material.BARREL, "{theme}Recipe Items", List.of(
+        ), "edit recipe description"));
+        inventory.setItem(ADMIN_EDITOR_ITEMS_SLOT, button(player, Material.BARREL, "{theme}Recipe Items", List.of(
                 "{white}Edit the 3x3 recipe grid and output item.",
                 "{white}Click to open the item editor."
-        )));
+        ), "edit recipe items"));
 
-        refreshAdminEditorButtons(inventory, recipe);
+        refreshAdminEditorButtons(player, inventory, recipe);
     }
 
     private void openCraftGui(Player player, CustomRecipe insertRecipe, boolean pullFromPlayerInventory) {
@@ -469,7 +473,7 @@ public final class GuiManager implements Listener {
         }
 
         refreshCraftPreview(player, inventory);
-        player.openInventory(inventory);
+        openForViewer(player, inventory);
     }
 
     @EventHandler
@@ -850,7 +854,7 @@ public final class GuiManager implements Listener {
         if (raw == DELETE_CONFIRM_CANCEL_SLOT) {
             plugin.getEditorSounds().back(player);
             if (holder.editorInventory != null) {
-                player.openInventory(holder.editorInventory);
+                openForViewer(player, holder.editorInventory);
             } else {
                 openAdminEditorGui(player, holder.recipeId, holder.returnPage);
             }
@@ -948,7 +952,7 @@ public final class GuiManager implements Listener {
             recipe.setType(recipe.getType() == RecipeType.SHAPED ? RecipeType.SHAPELESS : RecipeType.SHAPED);
             recipeManager.upsert(recipe);
             plugin.getEditorSounds().cycle(player);
-            refreshAdminEditorMeta(top, recipe);
+            refreshAdminEditorMeta(player, top, recipe);
             messages.send(player, "admin-type-changed", Map.of("type", recipe.getType().name()));
             return;
         }
@@ -958,7 +962,7 @@ public final class GuiManager implements Listener {
             recipe.setMatchMode(nextMatchMode(recipe.getMatchMode()));
             recipeManager.upsert(recipe);
             plugin.getEditorSounds().cycle(player);
-            refreshAdminEditorMeta(top, recipe);
+            refreshAdminEditorMeta(player, top, recipe);
             messages.send(player, "admin-match-mode-changed", Map.of("mode", recipe.getMatchMode().name()));
             return;
         }
@@ -968,7 +972,7 @@ public final class GuiManager implements Listener {
             recipe.setEnabled(!recipe.isEnabled());
             recipeManager.upsert(recipe);
             plugin.getEditorSounds().toggle(player, recipe.isEnabled());
-            refreshAdminEditorMeta(top, recipe);
+            refreshAdminEditorMeta(player, top, recipe);
             messages.send(player, recipe.isEnabled() ? "admin-enabled" : "admin-disabled");
             return;
         }
@@ -1627,30 +1631,32 @@ public final class GuiManager implements Listener {
         inventory.setItem(gui.resultSlot(), result);
     }
 
-    private void refreshAdminEditorButtons(Inventory inventory, CustomRecipe recipe) {
-        inventory.setItem(ADMIN_EDITOR_TYPE_SLOT, named(
+    private void refreshAdminEditorButtons(Player player, Inventory inventory, CustomRecipe recipe) {
+        inventory.setItem(ADMIN_EDITOR_TYPE_SLOT, button(player,
                 recipe.getType() == RecipeType.SHAPED ? Material.OAK_SIGN : Material.MAGMA_CREAM,
-                "{theme}Type: " + recipeTypeLabel(recipe.getType()),
-                recipeTypeLore(recipe.getType())
+                "{theme}Type", List.of("{white}Current: {theme}" + recipeTypeLabel(recipe.getType())),
+                "cycle recipe type"
         ));
 
-        inventory.setItem(ADMIN_EDITOR_MATCH_MODE_SLOT, named(
+        inventory.setItem(ADMIN_EDITOR_MATCH_MODE_SLOT, button(player,
                 Material.LODESTONE,
-                "{theme}Match: " + matchModeLabel(recipe.getMatchMode()),
-                matchModeLore(recipe.getMatchMode())
+                "{theme}Match Mode", List.of("{white}Current: {theme}" + matchModeLabel(recipe.getMatchMode())),
+                "cycle match mode"
         ));
 
-        inventory.setItem(ADMIN_EDITOR_ENABLED_SLOT, named(
+        inventory.setItem(ADMIN_EDITOR_ENABLED_SLOT, button(player,
                 recipe.isEnabled() ? Material.LIME_DYE : Material.RED_DYE,
                 recipe.isEnabled() ? "{good}Enabled" : "{bad}Disabled",
-                List.of("{white}Click to toggle enabled state.")
+                List.of("{white}Click to toggle enabled state.",
+                        "{white}State: " + (recipe.isEnabled() ? "{good}ON" : "{bad}OFF")),
+                "toggle recipe"
         ));
 
-        inventory.setItem(ADMIN_EDITOR_DELETE_SLOT, named(Material.LAVA_BUCKET, "{bad}Delete Recipe", List.of(
+        inventory.setItem(ADMIN_EDITOR_DELETE_SLOT, button(player, Material.LAVA_BUCKET, "{bad}Delete Recipe", List.of(
                 "{white}Open confirmation first.",
                 "{bad}This permanently deletes the recipe."
-        )));
-        inventory.setItem(ADMIN_EDITOR_BACK_SLOT, buttons.back());
+        ), "delete recipe"));
+        inventory.setItem(ADMIN_EDITOR_BACK_SLOT, buttons.back(player));
     }
 
     private ItemStack adminRecipeIcon(CustomRecipe recipe) {
@@ -1733,8 +1739,15 @@ public final class GuiManager implements Listener {
             return stack;
         }
 
-        meta.setDisplayName(renderLine(item.name(), placeholders));
-        meta.setLore(renderLore(item.lore(), placeholders, expansions));
+        String renderedName = renderLine(item.name(), placeholders);
+        List<String> renderedLore = renderLore(item.lore(), placeholders, expansions);
+        String iconizedName = DialogIcons.withMaterialIcon(renderedName, item.material());
+        if (!DialogIcons.applyItemMetaTemplate(meta, iconizedName, renderedLore)) {
+            meta.setDisplayName(DialogIcons.fallbackText(DialogIcons.render(iconizedName)));
+            meta.setLore(renderedLore.stream()
+                    .map(line -> DialogIcons.fallbackText(DialogIcons.render(line)))
+                    .toList());
+        }
         if (item.customModelData() != null) {
             meta.setCustomModelData(item.customModelData());
         }
@@ -1852,12 +1865,12 @@ public final class GuiManager implements Listener {
     }
 
     private List<String> sortOptionLines(CustomRecipesGui gui, SortMode selected) {
-        List<String> lines = new ArrayList<>();
+        List<String> information = new ArrayList<>();
         for (SortMode mode : SortMode.values()) {
             String template = mode == selected ? gui.sortSelectedLine() : gui.sortUnselectedLine();
-            lines.add(renderLine(template, Map.of("sort", mode.displayName)));
+            information.add(renderLine(template, Map.of("sort", mode.displayName)));
         }
-        return lines;
+        return FoButtonStyle.buttonLore(information, "cycle");
     }
 
     private List<String> descriptionExpansion(String template, CustomRecipe recipe) {
@@ -1950,11 +1963,22 @@ public final class GuiManager implements Listener {
     }
 
     private String renderLine(String input, Map<String, String> placeholders) {
-        return color(CommandPlaceholders.apply(input == null ? "" : input, placeholders));
+        return messages.renderTemplateForItem(
+                CommandPlaceholders.apply(input == null ? "" : input, placeholders), Map.of());
     }
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private void openForViewer(Player player, Inventory inventory) {
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            ItemStack item = inventory.getItem(slot);
+            if (item != null) {
+                inventory.setItem(slot, DialogIcons.forViewer(player, item));
+            }
+        }
+        player.openInventory(inventory);
     }
 
     private ItemStack named(Material material, String name, List<String> lore) {
@@ -1975,6 +1999,14 @@ public final class GuiManager implements Listener {
         meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
         stack.setItemMeta(meta);
         return stack;
+    }
+
+    private ItemStack button(Player viewer, Material material, String name, List<String> lore, String action) {
+        String renderedName = color(name);
+        String nameColor = renderedName.contains(FoStyle.BAD) ? FoStyle.BAD
+                : renderedName.contains(FoStyle.GOOD) ? FoStyle.GOOD : FoStyle.THEME;
+        List<String> renderedLore = lore == null ? List.of() : lore.stream().map(this::color).toList();
+        return EditorItemFactory.button(viewer, material, nameColor, FoText.plain(renderedName), renderedLore, action);
     }
 
     private ItemStack emptyRecipeSlotFiller() {
@@ -2526,7 +2558,7 @@ public final class GuiManager implements Listener {
     private void refreshOpenEditorIfMatching(Player player, CustomRecipe recipe, ChatPrompt prompt) {
         Inventory top = player.getOpenInventory().getTopInventory();
         if (top.getHolder() instanceof AdminEditorHolder holder && holder.recipeId.equals(recipe.getId())) {
-            refreshAdminEditorMeta(top, recipe);
+            refreshAdminEditorMeta(player, top, recipe);
             return;
         }
         openAdminEditorGui(player, recipe.getId(), prompt.returnPage);

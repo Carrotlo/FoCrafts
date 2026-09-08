@@ -3,7 +3,7 @@
 # Titles are rendered small caps in code to match Fo GUI style.
 # Common item keys: slot, material, amount, name, lore, custom-model-data, glow, flags.
 
-title: "Custom Recipes"
+title: "ᴄᴜꜱᴛᴏᴍ ʀᴇᴄɪᴘᴇꜱ"
 rows: 6
 
 # Dynamic recipe entries render in these slots.
@@ -52,7 +52,7 @@ items:
   sort:
     slot: 48
     material: CLOCK
-    name: "{theme}Sort: {sort}"
+    name: "{theme}&lSORT"
     lore:
       - "{sort_options}"
     # Valid placeholder for these lines: {sort}.

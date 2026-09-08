@@ -3,7 +3,7 @@
 # Titles are rendered small caps in code to match Fo GUI style.
 # Common item keys: slot, material, amount, name, lore, custom-model-data, glow, flags.
 
-title: "Recipe Preview"
+title: "ʀᴇᴄɪᴘᴇ ᴘʀᴇᴠɪᴇᴡ"
 rows: 6
 
 # The 3x3 recipe ingredient preview. Must contain exactly 9 valid slots.

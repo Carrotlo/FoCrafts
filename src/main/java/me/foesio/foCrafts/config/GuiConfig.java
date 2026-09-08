@@ -39,6 +39,9 @@ public final class GuiConfig {
             "{white}Permission: {theme}{permission}",
             "{white}Click result or Craft buttons."
     );
+    private static final List<String> OLD_BROWSE_RECIPES_LORE = List.of(
+            "{white}Open the recipe browser."
+    );
     private static final Set<String> CUSTOM_RECIPES_BUTTON_TEMPLATE_PATHS = sharedButtonTemplatePaths(
             "items.search",
             "items.clear-search",
@@ -91,7 +94,11 @@ public final class GuiConfig {
                 plugin,
                 "guis/custom-crafting.yml",
                 CUSTOM_CRAFTING_REMOVED_PATHS,
-                Map.of("result-item.lore", OLD_CUSTOM_CRAFTING_RESULT_LORE)
+                Map.of(
+                        "result-item.lore", OLD_CUSTOM_CRAFTING_RESULT_LORE,
+                        "items.browse-recipes.name", ":book: {theme}&lBROWSE RECIPES",
+                        "items.browse-recipes.lore", OLD_BROWSE_RECIPES_LORE
+                )
         );
         int rows = readRows(cfg, "rows", 6);
         int size = rows * 9;
@@ -101,8 +108,13 @@ public final class GuiConfig {
                 readExactSlots(cfg, "grid-slots", size, DEFAULT_CRAFT_GRID_SLOTS, 9),
                 readSlot(cfg, "result-slot", size, 24),
                 readItem(cfg, "filler", size, new GuiItem(-1, Material.GRAY_STAINED_GLASS_PANE, 1, " ", List.of(), null, false, List.of())),
-                readItem(cfg, "items.browse-recipes", size, new GuiItem(49, Material.BOOK, 1, "{theme}Browse Recipes", List.of(
-                        "{white}Open the recipe browser."
+                readItem(cfg, "items.browse-recipes", size, new GuiItem(49, Material.BOOK, 1, "{theme}&lBROWSE RECIPES", List.of(
+                        "&8ʙᴜᴛᴛᴏɴ",
+                        " ",
+                        "&eⓘ Information ↓",
+                        "&7&l | &fOpen the recipe browser.",
+                        " ",
+                        "{good}→ Click to Browse Recipes ←"
                 ), null, false, List.of(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ADDITIONAL_TOOLTIP))),
                 readItem(cfg, "result-items.no-match", size, new GuiItem(-1, Material.GRAY_DYE, 1, "{muted}No matching recipe", List.of(
                         "{white}Place items in the grid to craft."
@@ -124,7 +136,8 @@ public final class GuiConfig {
     }
 
     private CustomRecipesGui loadCustomRecipes() {
-        YamlConfiguration cfg = YamlFileUpdater.update(plugin, "guis/custom-recipes.yml", CUSTOM_RECIPES_BUTTON_TEMPLATE_PATHS, Map.of());
+        YamlConfiguration cfg = YamlFileUpdater.update(plugin, "guis/custom-recipes.yml", CUSTOM_RECIPES_BUTTON_TEMPLATE_PATHS,
+                Map.of("items.sort.name", ":clock: {theme}&lSORT"));
         int rows = readRows(cfg, "rows", 6);
         int size = rows * 9;
         return new CustomRecipesGui(
@@ -138,7 +151,7 @@ public final class GuiConfig {
                 readButtonSlot(cfg, "items.search", size, 51),
                 readButtonSlot(cfg, "items.clear-search", size, 52),
                 readButtonSlot(cfg, "items.back-to-craft", size, 49),
-                readItem(cfg, "items.sort", size, new GuiItem(48, Material.CLOCK, 1, "{theme}Sort: {sort}", List.of(
+                readItem(cfg, "items.sort", size, new GuiItem(48, Material.CLOCK, 1, "{theme}&lSORT", List.of(
                         "{sort_options}"
                 ), null, false, List.of(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ADDITIONAL_TOOLTIP))),
                 cfg.getString("items.sort.selected-line", "{theme}» {sort}"),

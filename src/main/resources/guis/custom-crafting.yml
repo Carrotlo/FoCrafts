@@ -3,7 +3,7 @@
 # Titles are rendered small caps in code to match Fo GUI style.
 # Common item keys: slot, material, amount, name, lore, custom-model-data, glow, flags.
 
-title: "Custom Crafting"
+title: "ᴄᴜꜱᴛᴏᴍ ᴄʀᴀꜰᴛɪɴɢ"
 rows: 6
 
 # The 3x3 input grid. Must contain exactly 9 valid slots.
@@ -28,9 +28,14 @@ items:
   browse-recipes:
     slot: 49
     material: BOOK
-    name: "{theme}Browse Recipes"
+    name: "{theme}&lBROWSE RECIPES"
     lore:
-      - "{white}Open the recipe browser."
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "&7&l | &fOpen the recipe browser."
+      - " "
+      - "{good}→ Click to Browse Recipes ←"
 
 result-items:
   no-match:

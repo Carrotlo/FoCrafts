@@ -74,10 +74,6 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
             }
 
             if (args[0].equalsIgnoreCase("version")) {
-                messages.send(sender, "admin-version", Map.of(
-                        "author", "Carrotio",
-                        "version", plugin.getDescription().getVersion()
-                ));
                 updates.checkAndSendVersion(sender);
                 return true;
             }
