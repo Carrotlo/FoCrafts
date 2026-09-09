@@ -3,6 +3,7 @@ package me.foesio.foCrafts;
 import me.foesio.core.FoCoreContext;
 import me.foesio.core.FoPluginCore;
 import me.foesio.core.dialog.NativeDialogConfigDefaults;
+import me.foesio.core.economy.VaultEconomyBridge;
 import me.foesio.core.message.FoMessageMigrations;
 import me.foesio.core.message.FoMessageService;
 import me.foesio.core.message.FoStyle;
@@ -17,7 +18,6 @@ import me.foesio.foCrafts.command.FoCraftsCommand;
 import me.foesio.foCrafts.config.GuiConfig;
 import me.foesio.foCrafts.gui.GuiManager;
 import me.foesio.foCrafts.recipe.RecipeManager;
-import me.foesio.foCrafts.util.VaultHook;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -36,7 +36,7 @@ public final class FoCrafts extends JavaPlugin {
     private FoMessageService messageService;
     private GuiConfig guiConfig;
     private GuiManager guiManager;
-    private VaultHook vaultHook;
+    private VaultEconomyBridge vaultEconomy;
 
     @Override
     public void onEnable() {
@@ -49,10 +49,10 @@ public final class FoCrafts extends JavaPlugin {
         this.updateNotices = core.createUpdateNotices(messageService, MODRINTH_PROJECT_ID, adminSounds).start();
         this.recipeManager = new RecipeManager(this);
         this.recipeManager.load();
-        this.vaultHook = new VaultHook(this);
+        this.vaultEconomy = core.createVaultEconomy();
         this.guiConfig = new GuiConfig(this);
         this.guiConfig.load();
-        this.guiManager = new GuiManager(this, recipeManager, messageService, guiConfig, vaultHook, this::getCore);
+        this.guiManager = new GuiManager(this, recipeManager, messageService, guiConfig, vaultEconomy, this::getCore);
 
         FoCraftsCommand commandHandler = new FoCraftsCommand(this, guiManager, messageService, updateNotices);
         registerCommand("craft", commandHandler);
@@ -83,7 +83,7 @@ public final class FoCrafts extends JavaPlugin {
                 .addMessages(messageService)
                 .add("guis", guiConfig::load)
                 .add("recipes", recipeManager::load)
-                .add("vault", vaultHook::refresh)
+                .add("vault", () -> vaultEconomy.reload())
                 .add("gui runtime", guiManager::clearRuntimeState)
                 .reload();
         if (!result.successful()) {

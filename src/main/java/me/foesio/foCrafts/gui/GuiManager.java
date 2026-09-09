@@ -46,7 +46,7 @@ import me.foesio.foCrafts.model.RecipeMatch;
 import me.foesio.foCrafts.model.RecipeMatchMode;
 import me.foesio.foCrafts.model.RecipeType;
 import me.foesio.foCrafts.recipe.RecipeManager;
-import me.foesio.foCrafts.util.VaultHook;
+import me.foesio.core.economy.VaultEconomyBridge;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.CommandSender;
@@ -134,7 +134,7 @@ public final class GuiManager implements Listener {
     private final RecipeManager recipeManager;
     private final FoMessageService messages;
     private final GuiConfig guiConfig;
-    private final VaultHook vaultHook;
+    private final VaultEconomyBridge vaultHook;
     private final Supplier<FoCoreContext> coreSupplier;
     private final ConfiguredTextDialogs textDialogs;
     private final FoCraftsTextInputFallback textFallback;
@@ -146,7 +146,7 @@ public final class GuiManager implements Listener {
     private final Map<UUID, WorldSelectionSession> worldSelectionSessions = new HashMap<>();
     private DialogService dialogService;
 
-    public GuiManager(FoCrafts plugin, RecipeManager recipeManager, FoMessageService messages, GuiConfig guiConfig, VaultHook vaultHook, Supplier<FoCoreContext> coreSupplier) {
+    public GuiManager(FoCrafts plugin, RecipeManager recipeManager, FoMessageService messages, GuiConfig guiConfig, VaultEconomyBridge vaultHook, Supplier<FoCoreContext> coreSupplier) {
         this.plugin = plugin;
         this.recipeManager = recipeManager;
         this.messages = messages;
@@ -1602,33 +1602,43 @@ public final class GuiManager implements Listener {
             RecipeMatch restricted = recipeManager.findFirstMatch(grid);
             if (restricted != null) {
                 if (!hasRecipePermission(player, restricted.recipe())) {
-                    inventory.setItem(gui.resultSlot(), createConfiguredItem(gui.lockedRecipe(), Map.of(
+                    setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(gui.lockedRecipe(), Map.of(
                             "permission", configuredPermission(restricted.recipe())
                     )));
                     return;
                 }
                 if (!isWorldAllowed(player, restricted.recipe())) {
-                    inventory.setItem(gui.resultSlot(), createConfiguredItem(gui.worldBlocked(), Map.of(
+                    setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(gui.worldBlocked(), Map.of(
                             "world", player.getWorld().getName()
                     )));
                     return;
                 }
             }
-            inventory.setItem(gui.resultSlot(), createConfiguredItem(gui.noMatch(), Map.of()));
+            setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(gui.noMatch(), Map.of()));
             return;
         }
 
         ItemStack result = normalize(match.recipe().getResult());
         if (result == null) {
-            inventory.setItem(gui.resultSlot(), createConfiguredItem(gui.noMatch(), Map.of()));
+            setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(gui.noMatch(), Map.of()));
             return;
         }
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
+            ensureOutputName(result, meta);
             meta.setLore(renderLore(gui.resultLore(), craftPlaceholders(match.recipe(), match.maxCraftable()), Map.of()));
             result.setItemMeta(meta);
         }
-        inventory.setItem(gui.resultSlot(), result);
+        setCraftResult(player, inventory, gui.resultSlot(), result);
+    }
+
+    /**
+     * Preview items are inserted after the inventory was opened. Resolve the
+     * raw template for this viewer at that point as well, otherwise the
+     * no-match icon (and result lore) can remain as literal :material: text.
+     */
+    private void setCraftResult(Player player, Inventory inventory, int resultSlot, ItemStack item) {
+        inventory.setItem(resultSlot, item == null ? null : DialogIcons.forViewer(player, item));
     }
 
     private void refreshAdminEditorButtons(Player player, Inventory inventory, CustomRecipe recipe) {
@@ -1704,10 +1714,27 @@ public final class GuiManager implements Listener {
 
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
+            ensureOutputName(result, meta);
             meta.setLore(renderLore(gui.resultLore(), recipePreviewPlaceholders(gui, player, recipe), Map.of()));
             result.setItemMeta(meta);
         }
         return result;
+    }
+
+    private void ensureOutputName(ItemStack item, ItemMeta meta) {
+        if (hasVisibleItemName(meta.hasDisplayName() ? meta.getDisplayName() : null)
+                || hasVisibleItemName(meta.hasItemName() ? meta.getItemName() : null)) {
+            return;
+        }
+        meta.setDisplayName(color("{white}" + formatMaterial(item.getType())));
+    }
+
+    private boolean hasVisibleItemName(String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        return DialogIcons.containsToken(name)
+                || !DialogIcons.fallbackText(DialogIcons.render(name)).isBlank();
     }
 
     private ItemStack createConfiguredItem(GuiItem item, Map<String, String> placeholders) {
