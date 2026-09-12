@@ -23,6 +23,8 @@ import me.foesio.core.inventory.OverflowPolicy;
 import me.foesio.core.item.FoItemStacks;
 import me.foesio.core.message.FoMessageService;
 import me.foesio.core.message.FoStyle;
+import me.foesio.core.number.LargeNumberParser;
+import me.foesio.core.number.NumberFormatters;
 import me.foesio.core.text.FoText;
 import me.foesio.core.selector.TriStateSelectionActionType;
 import me.foesio.core.selector.TriStateSelectionClick;
@@ -69,7 +71,6 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -139,8 +140,6 @@ public final class GuiManager implements Listener {
     private final ConfiguredTextDialogs textDialogs;
     private final FoCraftsTextInputFallback textFallback;
     private final GuiButtonConfig buttons = GuiButtonConfig.defaults();
-    private final DecimalFormat moneyFormat = new DecimalFormat("0.##");
-
     private final Map<UUID, PlayerRecipeState> playerRecipeStates = new HashMap<>();
     private final Map<UUID, AdminListState> adminListStates = new HashMap<>();
     private final Map<UUID, WorldSelectionSession> worldSelectionSessions = new HashMap<>();
@@ -223,15 +222,15 @@ public final class GuiManager implements Listener {
         Inventory inventory = Bukkit.createInventory(holder, gui.size(), styleTitle(gui.title()));
         holder.setInventory(inventory);
 
-        fillInventory(inventory, gui.filler());
-        fillSlots(inventory, gui.contentSlots(), gui.emptyContent());
+        fillInventory(player, inventory, gui.filler());
+        fillSlots(player, inventory, gui.contentSlots(), gui.emptyContent());
 
         int start = page * pageSize;
         int end = Math.min(start + pageSize, recipes.size());
         for (int i = start; i < end; i++) {
             int slot = gui.contentSlots().get(i - start);
             CustomRecipe recipe = recipes.get(i);
-            inventory.setItem(slot, recipeIcon(gui, recipe, !hasRecipePermission(player, recipe)));
+            inventory.setItem(slot, recipeIcon(player, gui, recipe, !hasRecipePermission(player, recipe)));
         }
 
         if (page > 0) {
@@ -248,12 +247,12 @@ public final class GuiManager implements Listener {
         if (returnToCraft) {
             placeButton(inventory, gui.backToCraft(), buttons.back(player));
         }
-        placeItem(inventory, gui.sort(), Map.of(
+        placeItem(player, inventory, gui.sort(), Map.of(
                 "sort", state.sort.displayName,
                 "search", state.search,
                 "page", String.valueOf(page + 1),
                 "max_page", String.valueOf(maxPage + 1)
-        ), Map.of("sort_options", sortOptionLines(gui, state.sort)));
+        ), Map.of("sort_options", sortOptionLines(player, gui, state.sort)));
 
         openForViewer(player, inventory);
     }
@@ -298,13 +297,13 @@ public final class GuiManager implements Listener {
         Inventory inventory = Bukkit.createInventory(holder, gui.size(), styleTitle(gui.title()));
         holder.setInventory(inventory);
 
-        fillInventory(inventory, gui.filler());
+        fillInventory(player, inventory, gui.filler());
         clearSlots(inventory, gui.gridSlots());
         clearSlot(inventory, gui.resultSlot());
         placeRecipeInGrid(inventory, recipe, gui.gridSlots());
         inventory.setItem(gui.resultSlot(), recipeResultPreview(gui, player, recipe));
 
-        placeItem(inventory, gui.details(), recipePreviewPlaceholders(gui, player, recipe),
+        placeItem(player, inventory, gui.details(), recipePreviewPlaceholders(gui, player, recipe),
                 Map.of("description", descriptionExpansion(gui.descriptionLine(), recipe)));
         placeButton(inventory, gui.back(), buttons.back(player));
 
@@ -463,10 +462,10 @@ public final class GuiManager implements Listener {
         Inventory inventory = Bukkit.createInventory(holder, gui.size(), styleTitle(gui.title()));
         holder.setInventory(inventory);
 
-        fillInventory(inventory, gui.filler());
+        fillInventory(player, inventory, gui.filler());
         clearSlots(inventory, gui.gridSlots());
         clearSlot(inventory, gui.resultSlot());
-        placeItem(inventory, gui.browseRecipes(), Map.of());
+        placeItem(player, inventory, gui.browseRecipes(), Map.of());
 
         if (insertRecipe != null && pullFromPlayerInventory) {
             prefillCraftGridFromInventory(player, inventory, insertRecipe, gui.gridSlots());
@@ -919,7 +918,7 @@ public final class GuiManager implements Listener {
                     PromptType.EDIT_COST,
                     recipe.getId(),
                     holder.returnPage,
-                    "{theme}Type costs: <xp_levels> <xp_points> <vault_money>. Example: 1 25 100. Type {bad}cancel {theme}to cancel."
+                    "{theme}Type costs: <xp_levels> <xp_points> <vault_money>. Example: 1 25 1Qa. Type {bad}cancel {theme}to cancel."
             );
             return;
         }
@@ -1415,7 +1414,7 @@ public final class GuiManager implements Listener {
             }
             if (!vaultHook.has(player, money)) {
                 return new CostCheck(false, "craft-cost-money", Map.of(
-                        "money", moneyFormat.format(money)
+                        "money", NumberFormatters.compact(money)
                 ));
             }
         }
@@ -1602,31 +1601,31 @@ public final class GuiManager implements Listener {
             RecipeMatch restricted = recipeManager.findFirstMatch(grid);
             if (restricted != null) {
                 if (!hasRecipePermission(player, restricted.recipe())) {
-                    setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(gui.lockedRecipe(), Map.of(
+                    setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(player, gui.lockedRecipe(), Map.of(
                             "permission", configuredPermission(restricted.recipe())
                     )));
                     return;
                 }
                 if (!isWorldAllowed(player, restricted.recipe())) {
-                    setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(gui.worldBlocked(), Map.of(
+                    setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(player, gui.worldBlocked(), Map.of(
                             "world", player.getWorld().getName()
                     )));
                     return;
                 }
             }
-            setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(gui.noMatch(), Map.of()));
+            setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(player, gui.noMatch(), Map.of()));
             return;
         }
 
         ItemStack result = normalize(match.recipe().getResult());
         if (result == null) {
-            setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(gui.noMatch(), Map.of()));
+            setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(player, gui.noMatch(), Map.of()));
             return;
         }
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
             ensureOutputName(result, meta);
-            meta.setLore(renderLore(gui.resultLore(), craftPlaceholders(match.recipe(), match.maxCraftable()), Map.of()));
+            meta.setLore(renderLore(player, gui.resultLore(), craftPlaceholders(match.recipe(), match.maxCraftable()), Map.of()));
             result.setItemMeta(meta);
         }
         setCraftResult(player, inventory, gui.resultSlot(), result);
@@ -1693,7 +1692,7 @@ public final class GuiManager implements Listener {
         return icon;
     }
 
-    private ItemStack recipeIcon(CustomRecipesGui gui, CustomRecipe recipe, boolean lockedForPlayer) {
+    private ItemStack recipeIcon(Player player, CustomRecipesGui gui, CustomRecipe recipe, boolean lockedForPlayer) {
         Map<String, String> placeholders = recipePlaceholders(recipe, lockedForPlayer);
         Map<String, List<String>> expansions = Map.of(
                 "description", descriptionExpansion(gui.descriptionLine(), recipe),
@@ -1701,21 +1700,21 @@ public final class GuiManager implements Listener {
         );
         ItemStack icon = normalize(recipe.getResult());
         if (icon == null) {
-            return createConfiguredItem(gui.invalidRecipeItem(), placeholders, Map.of());
+            return createConfiguredItem(player, gui.invalidRecipeItem(), placeholders, Map.of());
         }
-        return createConfiguredItemFromStack(icon, gui.recipeItem(), placeholders, expansions);
+        return createConfiguredItemFromStack(player, icon, gui.recipeItem(), placeholders, expansions);
     }
 
     private ItemStack recipeResultPreview(RecipePreviewGui gui, Player player, CustomRecipe recipe) {
         ItemStack result = normalize(recipe.getResult());
         if (result == null) {
-            return createConfiguredItem(gui.invalidResult(), recipePreviewPlaceholders(gui, player, recipe), Map.of());
+            return createConfiguredItem(player, gui.invalidResult(), recipePreviewPlaceholders(gui, player, recipe), Map.of());
         }
 
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
             ensureOutputName(result, meta);
-            meta.setLore(renderLore(gui.resultLore(), recipePreviewPlaceholders(gui, player, recipe), Map.of()));
+            meta.setLore(renderLore(player, gui.resultLore(), recipePreviewPlaceholders(gui, player, recipe), Map.of()));
             result.setItemMeta(meta);
         }
         return result;
@@ -1737,26 +1736,26 @@ public final class GuiManager implements Listener {
                 || !DialogIcons.fallbackText(DialogIcons.render(name)).isBlank();
     }
 
-    private ItemStack createConfiguredItem(GuiItem item, Map<String, String> placeholders) {
-        return createConfiguredItem(item, placeholders, Map.of());
+    private ItemStack createConfiguredItem(Player player, GuiItem item, Map<String, String> placeholders) {
+        return createConfiguredItem(player, item, placeholders, Map.of());
     }
 
-    private ItemStack createConfiguredItem(GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
+    private ItemStack createConfiguredItem(Player player, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
         ItemStack stack = new ItemStack(item.material(), item.amount());
-        return applyConfiguredItem(stack, item, placeholders, expansions, false);
+        return applyConfiguredItem(player, stack, item, placeholders, expansions, false);
     }
 
-    private ItemStack createConfiguredItemFromStack(ItemStack base, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
+    private ItemStack createConfiguredItemFromStack(Player player, ItemStack base, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
         ItemStack stack = normalize(base);
         if (stack == null) {
             stack = new ItemStack(item.material(), item.amount());
-            return applyConfiguredItem(stack, item, placeholders, expansions, false);
+            return applyConfiguredItem(player, stack, item, placeholders, expansions, false);
         }
-        return applyConfiguredItem(stack, item, placeholders, expansions, true);
+        return applyConfiguredItem(player, stack, item, placeholders, expansions, true);
     }
 
     @SuppressWarnings("deprecation")
-    private ItemStack applyConfiguredItem(ItemStack stack, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions, boolean preserveAmount) {
+    private ItemStack applyConfiguredItem(Player player, ItemStack stack, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions, boolean preserveAmount) {
         if (!preserveAmount) {
             stack.setAmount(item.amount());
         }
@@ -1766,13 +1765,13 @@ public final class GuiManager implements Listener {
             return stack;
         }
 
-        String renderedName = renderLine(item.name(), placeholders);
-        List<String> renderedLore = renderLore(item.lore(), placeholders, expansions);
+        String renderedName = renderLine(player, item.name(), placeholders);
+        List<String> renderedLore = renderLore(player, item.lore(), placeholders, expansions);
         String iconizedName = DialogIcons.withMaterialIcon(renderedName, item.material());
-        if (!DialogIcons.applyItemMetaTemplate(meta, iconizedName, renderedLore)) {
-            meta.setDisplayName(DialogIcons.fallbackText(DialogIcons.render(iconizedName)));
+        if (!DialogIcons.applyItemMeta(meta, player, iconizedName, renderedLore)) {
+            meta.setDisplayName(DialogIcons.fallbackText(DialogIcons.render(player, iconizedName)));
             meta.setLore(renderedLore.stream()
-                    .map(line -> DialogIcons.fallbackText(DialogIcons.render(line)))
+                    .map(line -> DialogIcons.fallbackText(DialogIcons.render(player, line)))
                     .toList());
         }
         if (item.customModelData() != null) {
@@ -1789,15 +1788,15 @@ public final class GuiManager implements Listener {
         return stack;
     }
 
-    private void fillInventory(Inventory inventory, GuiItem filler) {
-        ItemStack item = createConfiguredItem(filler, Map.of());
+    private void fillInventory(Player player, Inventory inventory, GuiItem filler) {
+        ItemStack item = createConfiguredItem(player, filler, Map.of());
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             inventory.setItem(slot, item.clone());
         }
     }
 
-    private void fillSlots(Inventory inventory, List<Integer> slots, GuiItem filler) {
-        ItemStack item = createConfiguredItem(filler, Map.of());
+    private void fillSlots(Player player, Inventory inventory, List<Integer> slots, GuiItem filler) {
+        ItemStack item = createConfiguredItem(player, filler, Map.of());
         for (int slot : slots) {
             if (isValidSlot(inventory, slot)) {
                 inventory.setItem(slot, item.clone());
@@ -1824,15 +1823,15 @@ public final class GuiManager implements Listener {
         inventory.setItem(button.slot(), FoItemStacks.cloneItem(item));
     }
 
-    private void placeItem(Inventory inventory, GuiItem item, Map<String, String> placeholders) {
-        placeItem(inventory, item, placeholders, Map.of());
+    private void placeItem(Player player, Inventory inventory, GuiItem item, Map<String, String> placeholders) {
+        placeItem(player, inventory, item, placeholders, Map.of());
     }
 
-    private void placeItem(Inventory inventory, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
+    private void placeItem(Player player, Inventory inventory, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
         if (item == null || !isValidSlot(inventory, item.slot())) {
             return;
         }
-        inventory.setItem(item.slot(), createConfiguredItem(item, placeholders, expansions));
+        inventory.setItem(item.slot(), createConfiguredItem(player, item, placeholders, expansions));
     }
 
     private boolean isValidSlot(Inventory inventory, int slot) {
@@ -1891,11 +1890,11 @@ public final class GuiManager implements Listener {
         }
     }
 
-    private List<String> sortOptionLines(CustomRecipesGui gui, SortMode selected) {
+    private List<String> sortOptionLines(Player player, CustomRecipesGui gui, SortMode selected) {
         List<String> information = new ArrayList<>();
         for (SortMode mode : SortMode.values()) {
             String template = mode == selected ? gui.sortSelectedLine() : gui.sortUnselectedLine();
-            information.add(renderLine(template, Map.of("sort", mode.displayName)));
+            information.add(renderLine(player, template, Map.of("sort", mode.displayName)));
         }
         return FoButtonStyle.buttonLore(information, "cycle");
     }
@@ -1959,7 +1958,7 @@ public final class GuiManager implements Listener {
         return gui.unlockedStatus();
     }
 
-    private List<String> renderLore(List<String> lore, Map<String, String> placeholders, Map<String, List<String>> expansions) {
+    private List<String> renderLore(Player player, List<String> lore, Map<String, String> placeholders, Map<String, List<String>> expansions) {
         if (lore == null || lore.isEmpty()) {
             return List.of();
         }
@@ -1968,11 +1967,11 @@ public final class GuiManager implements Listener {
             String expansionKey = expansionKey(line);
             if (expansionKey != null && expansions.containsKey(expansionKey)) {
                 for (String expandedLine : expansions.get(expansionKey)) {
-                    rendered.add(renderLine(expandedLine, placeholders));
+                    rendered.add(renderLine(player, expandedLine, placeholders));
                 }
                 continue;
             }
-            rendered.add(renderLine(line, placeholders));
+            rendered.add(renderLine(player, line, placeholders));
         }
         return rendered;
     }
@@ -1989,8 +1988,9 @@ public final class GuiManager implements Listener {
         return key.matches("[A-Za-z0-9_-]+") ? key : null;
     }
 
-    private String renderLine(String input, Map<String, String> placeholders) {
-        return messages.renderTemplateForItem(
+    private String renderLine(Player player, String input, Map<String, String> placeholders) {
+        return messages.renderTemplateForViewer(
+                player,
                 CommandPlaceholders.apply(input == null ? "" : input, placeholders), Map.of());
     }
 
@@ -2236,7 +2236,7 @@ public final class GuiManager implements Listener {
                     body,
                     "{white}XP levels, XP points, money",
                     "{current}",
-                    "1 25 100",
+                    "1 25 1Qa",
                     DialogButton.save(),
                     DialogButton.cancel(),
                     320,
@@ -2343,7 +2343,7 @@ public final class GuiManager implements Listener {
 
     private String formatCostPromptValue(RecipeCost cost) {
         double money = cost.getVaultMoney();
-        String moneyValue = money == Math.rint(money) ? String.valueOf((long) money) : Double.toString(money);
+        String moneyValue = NumberFormatters.compact(money);
         return cost.getXpLevels() + " " + cost.getXpPoints() + " " + moneyValue;
     }
 
@@ -2515,7 +2515,8 @@ public final class GuiManager implements Listener {
         try {
             int levels = Integer.parseInt(split[0]);
             int points = Integer.parseInt(split[1]);
-            double money = Double.parseDouble(split[2]);
+            double money = LargeNumberParser.parseDouble(split[2])
+                    .orElseThrow(() -> new NumberFormatException("Invalid money amount"));
             if (levels < 0 || points < 0 || money < 0) {
                 plugin.getEditorSounds().error(player);
                 messages.send(player, "chat-prompt-invalid");
@@ -2734,7 +2735,7 @@ public final class GuiManager implements Listener {
             parts.add(cost.getXpPoints() + " xp");
         }
         if (cost.getVaultMoney() > 0.0D) {
-            parts.add("$" + moneyFormat.format(cost.getVaultMoney()));
+            parts.add("$" + NumberFormatters.compact(cost.getVaultMoney()));
         }
         return String.join(", ", parts);
     }
