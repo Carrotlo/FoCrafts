@@ -3,7 +3,6 @@ package me.foesio.foCrafts.gui;
 import me.foesio.core.FoCoreContext;
 import me.foesio.core.command.CommandPlaceholders;
 import me.foesio.core.dialog.ConfirmationDialogRequest;
-import me.foesio.core.dialog.ConfiguredTextDialogs;
 import me.foesio.core.dialog.DialogButton;
 import me.foesio.core.dialog.DialogIcons;
 import me.foesio.core.dialog.DialogService;
@@ -11,7 +10,6 @@ import me.foesio.core.dialog.FallbackDialogService;
 import me.foesio.core.dialog.TextDialogRequest;
 import me.foesio.core.editor.EditorDialogInputs;
 import me.foesio.core.editor.EditorItemFactory;
-import me.foesio.core.gui.FoButtonStyle;
 import me.foesio.core.gui.GuiButtonConfig;
 import me.foesio.core.gui.GuiSlots;
 import me.foesio.core.gui.EntryBrowserClick;
@@ -19,6 +17,18 @@ import me.foesio.core.gui.EntryBrowserHolder;
 import me.foesio.core.gui.EntryBrowserMenus;
 import me.foesio.core.gui.EntryBrowserRequest;
 import me.foesio.core.gui.GuiTitles;
+import me.foesio.core.gui.publicgui.ClickKind;
+import me.foesio.core.gui.publicgui.GuiDiagnostic;
+import me.foesio.core.gui.publicgui.PublicGuiClick;
+import me.foesio.core.gui.publicgui.PublicGuiContract;
+import me.foesio.core.gui.publicgui.PublicGuiDefinition;
+import me.foesio.core.gui.publicgui.PublicGuiFrame;
+import me.foesio.core.gui.publicgui.PublicGuiItemRenderer;
+import me.foesio.core.gui.publicgui.PublicGuiInventoryHolder;
+import me.foesio.core.gui.publicgui.PublicGuiRenderInput;
+import me.foesio.core.gui.publicgui.PublicGuiRenderer;
+import me.foesio.core.gui.publicgui.PublicGuiService;
+import me.foesio.core.gui.publicgui.PublicGuiText;
 import me.foesio.core.inventory.OverflowPolicy;
 import me.foesio.core.item.FoItemStacks;
 import me.foesio.core.message.FoMessageService;
@@ -34,13 +44,7 @@ import me.foesio.core.selector.TriStateSelectionRequest;
 import me.foesio.core.selector.TriStateSelectionState;
 import me.foesio.core.selector.TriStateSelections;
 import me.foesio.core.selector.WorldSelectionEntries;
-import me.foesio.foCrafts.config.GuiConfig;
 import me.foesio.foCrafts.FoCrafts;
-import me.foesio.foCrafts.config.GuiConfig.CustomCraftingGui;
-import me.foesio.foCrafts.config.GuiConfig.CustomRecipesGui;
-import me.foesio.foCrafts.config.GuiConfig.GuiButtonSlot;
-import me.foesio.foCrafts.config.GuiConfig.GuiItem;
-import me.foesio.foCrafts.config.GuiConfig.RecipePreviewGui;
 import me.foesio.foCrafts.input.FoCraftsTextInputFallback;
 import me.foesio.foCrafts.model.CustomRecipe;
 import me.foesio.foCrafts.model.RecipeCost;
@@ -82,6 +86,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.text.NumberFormat;
+import java.nio.file.Path;
 import java.util.function.Supplier;
 
 public final class GuiManager implements Listener {
@@ -91,6 +97,9 @@ public final class GuiManager implements Listener {
             19, 20, 21, 22, 23, 24, 25,
             28, 29, 30, 31, 32, 33, 34
     };
+    private static final Set<String> BROWSER_ENTRY_PLACEHOLDERS = Set.of(
+            "recipe_id", "recipe_name", "description", "permission", "type", "match_mode",
+            "cost", "locked");
 
     private static final int RESULT_SLOT = 24;
 
@@ -134,37 +143,241 @@ public final class GuiManager implements Listener {
     private final FoCrafts plugin;
     private final RecipeManager recipeManager;
     private final FoMessageService messages;
-    private final GuiConfig guiConfig;
+    private final PublicGuiService publicGui;
     private final VaultEconomyBridge vaultHook;
     private final Supplier<FoCoreContext> coreSupplier;
-    private final ConfiguredTextDialogs textDialogs;
+    private final OwnerSearchDialog textDialogs;
     private final FoCraftsTextInputFallback textFallback;
     private final GuiButtonConfig buttons = GuiButtonConfig.defaults();
     private final Map<UUID, PlayerRecipeState> playerRecipeStates = new HashMap<>();
+    private final Map<UUID, BrowserContext> browserContexts = new HashMap<>();
     private final Map<UUID, AdminListState> adminListStates = new HashMap<>();
     private final Map<UUID, WorldSelectionSession> worldSelectionSessions = new HashMap<>();
     private DialogService dialogService;
 
-    public GuiManager(FoCrafts plugin, RecipeManager recipeManager, FoMessageService messages, GuiConfig guiConfig, VaultEconomyBridge vaultHook, Supplier<FoCoreContext> coreSupplier) {
+    public GuiManager(FoCrafts plugin, RecipeManager recipeManager, FoMessageService messages, VaultEconomyBridge vaultHook, Supplier<FoCoreContext> coreSupplier) {
         this.plugin = plugin;
         this.recipeManager = recipeManager;
         this.messages = messages;
-        this.guiConfig = guiConfig;
         this.vaultHook = vaultHook;
         this.coreSupplier = coreSupplier;
-        this.textDialogs = ConfiguredTextDialogs.create(plugin)
-                .register("search", searchDialogRequest("", "Any search text"));
-        this.textDialogs.load();
+        this.textDialogs = new OwnerSearchDialog(plugin);
         this.textFallback = new FoCraftsTextInputFallback(messages, () -> currentCore().nativeDialogs());
         refreshDialogService();
+        this.publicGui = registerPublicGuis();
+    }
+
+    private PublicGuiService registerPublicGuis() {
+        Path directory = plugin.getDataFolder().toPath().resolve("guis");
+        PublicGuiService service = new PublicGuiService(plugin)
+                .menu("focrafts.custom-crafting", directory.resolve("custom-crafting.yml"),
+                        new PublicGuiContract(Set.of("craft.browse"),
+                                Map.of("grid-slots", PublicGuiContract.GroupRule.exactly(
+                                        PublicGuiContract.GroupRole.PHYSICAL_INPUT, 9)),
+                                Set.of("recipe_id", "recipe_name", "description", "permission", "type",
+                                        "match_mode", "cost", "locked", "max_craftable", "world", "material"),
+                                PublicGuiContract.InteractionMode.PLUGIN_OWNED))
+                .menu("focrafts.custom-recipes", directory.resolve("custom-recipes.yml"),
+                        new PublicGuiContract(Set.of("recipes.previous", "recipes.next", "recipes.search",
+                                        "recipes.clear-search", "recipes.back", "recipes.sort", "recipes.view"),
+                                Map.of(), Set.of("current", "target", "page", "max_page", "recipe_id",
+                                        "recipe_name", "description", "permission", "type", "match_mode",
+                                        "cost", "locked", "material"), PublicGuiContract.InteractionMode.CORE))
+                .menu("focrafts.recipe-preview", directory.resolve("recipe-preview.yml"),
+                        new PublicGuiContract(Set.of("preview.back"), Map.of(),
+                                Set.of("recipe_id", "recipe_name", "description", "permission", "type",
+                                        "match_mode", "cost", "locked", "status", "world", "material"),
+                                PublicGuiContract.InteractionMode.CORE))
+                .entryPoint("craft.command", "focrafts.custom-crafting")
+                .entryPoint("recipes.command", "focrafts.custom-recipes")
+                .navigation("craft.browse", "focrafts.custom-recipes")
+                .navigation("recipes.view", "focrafts.recipe-preview")
+                .navigation("recipes.back", "focrafts.custom-crafting")
+                .navigation("preview.back", "focrafts.custom-recipes")
+                .pluginRoute("focrafts.custom-crafting", this)
+                .requireEntry("focrafts.custom-crafting", "result", 1)
+                .requireEntry("focrafts.custom-recipes", "recipes", 0)
+                .requireEntryLoreState("focrafts.custom-recipes", "recipes", "both")
+                .requireEntryLoreState("focrafts.custom-recipes", "recipes", "description-only")
+                .requireEntryLoreState("focrafts.custom-recipes", "recipes", "locked-only")
+                .requireEntryLoreState("focrafts.custom-recipes", "recipes", "plain")
+                .requireEntryLoreState("focrafts.custom-recipes", "recipes", "invalid")
+                .requireEntry("focrafts.recipe-preview", "ingredients", 9)
+                .requireEntry("focrafts.recipe-preview", "result", 1)
+                .requireState("focrafts.custom-recipes", "invalid-recipe")
+                .requireState("focrafts.custom-crafting", "locked")
+                .requireState("focrafts.custom-crafting", "world-blocked")
+                .action("recipes.previous", click -> browserAction(click, "previous"))
+                .action("recipes.next", click -> browserAction(click, "next"))
+                .action("recipes.search", click -> browserAction(click, "search"))
+                .action("recipes.clear-search", click -> browserAction(click, "clear"))
+                .action("recipes.back", click -> browserAction(click, "back"))
+                .action("recipes.sort", click -> browserAction(click, "sort"))
+                .action("recipes.view", this::viewRecipe)
+                .action("preview.back", this::backFromPreview);
+        service.start(definitions -> new PublicGuiService.PreparedDependency(
+                validatePublicDefinitions(definitions), () -> {}));
+        service.reload();
+        return service;
+    }
+
+    static List<GuiDiagnostic> validatePublicDefinitions(Map<String, PublicGuiDefinition> definitions) {
+        List<GuiDiagnostic> problems = new ArrayList<>();
+        for (String menu : List.of("focrafts.custom-crafting", "focrafts.custom-recipes",
+                "focrafts.recipe-preview")) {
+            PublicGuiDefinition definition = definitions.get(menu);
+            if (definition == null) continue;
+            String entryId = menu.equals("focrafts.custom-recipes") ? "recipes" : "result";
+            PublicGuiDefinition.Entry entry = definition.entries().get(entryId);
+            if (entry != null && entry.sourceItem() == null) {
+                problems.add(new GuiDiagnostic(definition.file(), "entries." + entryId + ".source-item",
+                        "this menu requires a real source-item template"));
+            }
+        }
+        for (Map.Entry<String, Map<String, Integer>> requirement : Map.of(
+                "focrafts.custom-crafting", Map.of("result", 1),
+                "focrafts.custom-recipes", Map.of("recipes", 0),
+                "focrafts.recipe-preview", Map.of("ingredients", 9, "result", 1)).entrySet()) {
+            PublicGuiDefinition definition = definitions.get(requirement.getKey());
+            if (definition == null) continue;
+            requirement.getValue().forEach((id, count) -> {
+                PublicGuiDefinition.Entry entry = definition.entries().get(id);
+                if (entry == null || (count > 0 && entry.slots().size() != count)
+                        || (count == 0 && entry.slots().isEmpty())) {
+                    problems.add(new GuiDiagnostic(definition.file(), "entries." + id,
+                            "required entry is missing or has the wrong number of slots"));
+                }
+            });
+        }
+        for (Map.Entry<String, List<String>> requirement : Map.of(
+                "focrafts.custom-crafting", List.of("locked", "world-blocked"),
+                "focrafts.custom-recipes", List.of("invalid-recipe")).entrySet()) {
+            PublicGuiDefinition definition = definitions.get(requirement.getKey());
+            if (definition == null) continue;
+            for (String state : requirement.getValue()) {
+                if (!definition.states().containsKey(state))
+                    problems.add(new GuiDiagnostic(definition.file(), "states." + state, "required state is missing"));
+            }
+        }
+        PublicGuiDefinition craft = definitions.get("focrafts.custom-crafting");
+        if (craft != null) {
+            PublicGuiDefinition.Entry result = craft.entries().get("result");
+            if (result != null && result.emptyItem() == null) {
+                problems.add(new GuiDiagnostic(craft.file(), "entries.result.empty-item",
+                        "crafting requires a no-match result item"));
+            }
+        }
+        PublicGuiDefinition browser = definitions.get("focrafts.custom-recipes");
+        if (browser != null) {
+            if (containsBrowserEntryPlaceholder(browser.title())
+                    || containsBrowserEntryPlaceholder(browser.filler())) {
+                problems.add(new GuiDiagnostic(browser.file(), "title/filler",
+                        "recipe-specific placeholders are available only inside recipe entries"));
+            }
+            browser.buttons().forEach((id, button) -> {
+                if (containsBrowserEntryPlaceholder(button.item())
+                        || button.states().values().stream().anyMatch(state ->
+                        containsBrowserEntryPlaceholder(state.item()))) {
+                    problems.add(new GuiDiagnostic(browser.file(), "buttons." + id,
+                            "recipe-specific placeholders are available only inside recipe entries"));
+                }
+            });
+            PublicGuiDefinition.Entry recipesEntry = browser.entries().get("recipes");
+            if (recipesEntry != null && containsBrowserEntryPlaceholder(recipesEntry.emptyItem())) {
+                problems.add(new GuiDiagnostic(browser.file(), "entries.recipes.empty-item",
+                        "an empty entry has no recipe-specific placeholder values"));
+            }
+            if (recipesEntry != null && recipesEntry.sourceItem() != null) {
+                for (String state : List.of("both", "description-only", "locked-only", "plain", "invalid")) {
+                    if (!recipesEntry.sourceItem().loreStates().containsKey(state)) {
+                        problems.add(new GuiDiagnostic(browser.file(),
+                                "entries.recipes.source-item.lore-states." + state,
+                                "recipe rendering requires this lore state"));
+                    }
+                }
+            }
+            PublicGuiDefinition.Button sort = browser.buttons().get("sort");
+            if (sort != null && sort.enabled() && sort.cycle() == null) {
+                problems.add(new GuiDiagnostic(browser.file(), "buttons.sort.cycle",
+                        "sort needs selected and unselected option formats"));
+            }
+            for (String id : List.of("previous-page", "next-page", "clear-search", "back-to-craft")) {
+                PublicGuiDefinition.Button button = browser.buttons().get(id);
+                if (button != null && button.enabled() && !button.states().containsKey("unavailable")) {
+                    problems.add(new GuiDiagnostic(browser.file(), "buttons." + id + ".states.unavailable",
+                            "this conditional control needs a non-clickable unavailable state"));
+                }
+            }
+        }
+        PublicGuiDefinition preview = definitions.get("focrafts.recipe-preview");
+        if (preview != null) {
+            PublicGuiDefinition.Entry ingredients = preview.entries().get("ingredients");
+            if (ingredients != null && ingredients.sourceItem() == null) {
+                problems.add(new GuiDiagnostic(preview.file(), "entries.ingredients.source-item",
+                        "ingredient previews need real source-item metadata"));
+            }
+        }
+        return problems;
+    }
+
+    private static boolean containsBrowserEntryPlaceholder(PublicGuiDefinition.FixedItem item) {
+        if (item == null) return false;
+        if (containsBrowserEntryPlaceholder(item.name())) return true;
+        return item.lore().stream().anyMatch(GuiManager::containsBrowserEntryPlaceholder);
+    }
+
+    private static boolean containsBrowserEntryPlaceholder(String text) {
+        if (text == null) return false;
+        for (String key : BROWSER_ENTRY_PLACEHOLDERS) {
+            if (text.contains("{" + key + "}")) return true;
+        }
+        return false;
+    }
+
+    public void validatePublicGuis() {
+        if (!publicGui.validateInstalled().successful()) {
+            throw new IllegalStateException("Invalid installed public GUI configuration");
+        }
+    }
+
+    public void validateSearchDialog() throws java.io.IOException,
+            org.bukkit.configuration.InvalidConfigurationException {
+        textDialogs.validateInstalled();
+    }
+
+    public void reloadPublicGuis() {
+        validatePublicGuis();
+        if (!publicGui.reload().successful()) {
+            throw new IllegalStateException("Public GUI reload failed");
+        }
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            InventoryHolder holder = player.getOpenInventory().getTopInventory().getHolder();
+            if (holder instanceof CraftHolder || holder instanceof PublicGuiInventoryHolder coreHolder
+                    && coreHolder.frame().definition().menuId().startsWith("focrafts.")) {
+                player.closeInventory();
+            }
+        }
+        browserContexts.clear();
+    }
+
+    public void closePublicGuis() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.getOpenInventory().getTopInventory().getHolder() instanceof CraftHolder) {
+                player.closeInventory();
+            }
+        }
+        publicGui.close();
     }
 
     public void clearRuntimeState() {
+        if (!textDialogs.reload()) {
+            throw new IllegalStateException("Invalid installed dialogs/search.yml; previous search dialog remains active");
+        }
         playerRecipeStates.clear();
+        browserContexts.clear();
         adminListStates.clear();
         worldSelectionSessions.clear();
         textFallback.reload();
-        textDialogs.reload();
         refreshDialogService();
     }
 
@@ -201,60 +414,73 @@ public final class GuiManager implements Listener {
     }
 
     public void openCraftGui(Player player) {
-        plugin.getGuiSounds().open(player);
+        if (publicGui.snapshot() == null) plugin.getGuiSounds().error(player);
+        else plugin.getGuiSounds().open(player);
         openCraftGui(player, null, false);
     }
 
     public void openRecipeListGui(Player player, int requestedPage) {
-        plugin.getGuiSounds().open(player);
+        if (publicGui.snapshot() == null) plugin.getGuiSounds().error(player);
+        else plugin.getGuiSounds().open(player);
         openRecipeListGui(player, requestedPage, false);
     }
 
     private void openRecipeListGui(Player player, int requestedPage, boolean returnToCraft) {
-        CustomRecipesGui gui = guiConfig.customRecipes();
+        if (publicGui.snapshot() == null) {
+            messages.send(player, "public-gui-unavailable", "");
+            return;
+        }
+        PublicGuiDefinition definition = publicGui.snapshot().require("focrafts.custom-recipes");
+        List<Integer> slots = definition.entries().get("recipes").slots();
         PlayerRecipeState state = getPlayerRecipeState(player);
         List<CustomRecipe> recipes = getFilteredPlayerRecipes(player, state);
-        int pageSize = Math.max(1, gui.contentSlots().size());
+        int pageSize = slots.size();
         int maxPage = Math.max(0, (recipes.size() - 1) / pageSize);
         int page = clampPage(requestedPage, maxPage);
-
-        RecipeListHolder holder = new RecipeListHolder(page, state.search, state.sort, returnToCraft, gui);
-        Inventory inventory = Bukkit.createInventory(holder, gui.size(), styleTitle(gui.title()));
-        holder.setInventory(inventory);
-
-        fillInventory(player, inventory, gui.filler());
-        fillSlots(player, inventory, gui.contentSlots(), gui.emptyContent());
-
+        Map<Integer, PublicGuiRenderInput.EntryValue> entries = new HashMap<>();
         int start = page * pageSize;
-        int end = Math.min(start + pageSize, recipes.size());
-        for (int i = start; i < end; i++) {
-            int slot = gui.contentSlots().get(i - start);
-            CustomRecipe recipe = recipes.get(i);
-            inventory.setItem(slot, recipeIcon(player, gui, recipe, !hasRecipePermission(player, recipe)));
+        for (int index = start; index < Math.min(start + pageSize, recipes.size()); index++) {
+            CustomRecipe recipe = recipes.get(index);
+            boolean locked = !hasRecipePermission(player, recipe);
+            ItemStack source = normalize(recipe.getResult());
+            boolean described = !safe(recipe.getDescription()).isBlank();
+            String stateId = described ? (locked ? "both" : "description-only")
+                    : (locked ? "locked-only" : "plain");
+            Map<String, String> values = new HashMap<>(recipePlaceholders(publicText("custom-recipes"), recipe, locked));
+            values.put("description", !described ? "" :
+                    publicLabel("custom-recipes", "browser-description", Map.of("description", recipe.getDescription())));
+            values.put("locked", locked ? publicLabel("custom-recipes", "browser-locked") : "");
+            if (source == null) {
+                source = PublicGuiItemRenderer.fixed(player, definition.states().get("invalid-recipe"),
+                        values, null, null, "states.invalid-recipe");
+                stateId = "invalid";
+            }
+            entries.put(slots.get(index - start), new PublicGuiRenderInput.EntryValue(
+                    recipe.getId(), source, values, stateId));
         }
+        Map<String, String> values = new HashMap<>(pagePlaceholders(page, maxPage));
+        values.put("current", state.search.isBlank() ? publicLabel("custom-recipes", "search-none") : state.search);
+        values.put("target", publicLabel("custom-recipes", "clear-search-target"));
+        Map<String, String> buttonStates = new HashMap<>();
+        if (page == 0) unavailableIfEnabled(definition, buttonStates, "previous-page");
+        if (page >= maxPage) unavailableIfEnabled(definition, buttonStates, "next-page");
+        if (state.search.isBlank()) unavailableIfEnabled(definition, buttonStates, "clear-search");
+        if (!returnToCraft) unavailableIfEnabled(definition, buttonStates, "back-to-craft");
+        Map<String, PublicGuiText.CycleSelection> cycles = Map.of();
+        PublicGuiDefinition.Button sort = definition.buttons().get("sort");
+        if (sort != null && sort.enabled()) {
+            cycles = Map.of("sort", new PublicGuiText.CycleSelection(List.of(
+                    publicLabel("custom-recipes", "sort-name-ascending"), publicLabel("custom-recipes", "sort-name-descending")),
+                    state.sort == SortMode.NAME_ASC ? 0 : 1));
+        }
+        browserContexts.put(player.getUniqueId(), new BrowserContext(page, returnToCraft, null));
+        publicGui.open(player, "focrafts.custom-recipes", new PublicGuiRenderInput(
+                values, buttonStates, cycles, Map.of("recipes", entries)));
+    }
 
-        if (page > 0) {
-            placeButton(inventory, gui.previousPage(), buttons.previousPage(player, page, maxPage));
-        }
-        if (page < maxPage) {
-            placeButton(inventory, gui.nextPage(), buttons.nextPage(player, page, maxPage));
-        }
-
-        placeButton(inventory, gui.search(), buttons.search(player, state.search));
-        if (!state.search.isBlank()) {
-            placeButton(inventory, gui.clearSearch(), buttons.clearSearch(player, "recipes"));
-        }
-        if (returnToCraft) {
-            placeButton(inventory, gui.backToCraft(), buttons.back(player));
-        }
-        placeItem(player, inventory, gui.sort(), Map.of(
-                "sort", state.sort.displayName,
-                "search", state.search,
-                "page", String.valueOf(page + 1),
-                "max_page", String.valueOf(maxPage + 1)
-        ), Map.of("sort_options", sortOptionLines(player, gui, state.sort)));
-
-        openForViewer(player, inventory);
+    private void unavailableIfEnabled(PublicGuiDefinition definition, Map<String, String> states, String id) {
+        PublicGuiDefinition.Button button = definition.buttons().get(id);
+        if (button != null && button.enabled()) states.put(id, "unavailable");
     }
 
     public void openAdminListGui(Player player, int requestedPage) {
@@ -286,34 +512,166 @@ public final class GuiManager implements Listener {
     private void openRecipePreviewGui(Player player, String recipeId, int returnPage, boolean returnToCraft) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(recipeId);
         if (optional.isEmpty()) {
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             openRecipeListGui(player, returnPage, returnToCraft);
             return;
         }
-
+        if (publicGui.snapshot() == null) {
+            messages.send(player, "public-gui-unavailable", "");
+            return;
+        }
         CustomRecipe recipe = optional.get();
-        RecipePreviewGui gui = guiConfig.recipePreview();
-        RecipePreviewHolder holder = new RecipePreviewHolder(returnPage, returnToCraft, gui);
-        Inventory inventory = Bukkit.createInventory(holder, gui.size(), styleTitle(gui.title()));
-        holder.setInventory(inventory);
+        PublicGuiDefinition definition = publicGui.snapshot().require("focrafts.recipe-preview");
+        Map<Integer, PublicGuiRenderInput.EntryValue> ingredients = new HashMap<>();
+        List<Integer> slots = definition.entries().get("ingredients").slots();
+        for (Map.Entry<Integer, ItemStack> ingredient : recipe.getIngredients().entrySet()) {
+            int slot = slotAt(slots, ingredient.getKey());
+            ItemStack source = normalize(ingredient.getValue());
+            if (slot >= 0 && source != null) {
+                ingredients.put(slot, new PublicGuiRenderInput.EntryValue(
+                        recipeId + ":" + ingredient.getKey(), source, Map.of()));
+            }
+        }
+        Map<String, String> values = new HashMap<>(recipePlaceholders(publicText("recipe-preview"), recipe,
+                !hasRecipePermission(player, recipe)));
+        values.put("description", safe(recipe.getDescription()).isBlank() ? "" :
+                publicLabel("recipe-preview", "preview-description", Map.of("description", recipe.getDescription())));
+        values.put("status", previewStatus(player, recipe));
+        values.put("world", player.getWorld().getName());
+        Map<String, Map<Integer, PublicGuiRenderInput.EntryValue>> entries = new HashMap<>();
+        entries.put("ingredients", ingredients);
+        ItemStack result = normalize(recipe.getResult());
+        if (result != null) {
+            entries.put("result", Map.of(definition.entries().get("result").slots().getFirst(),
+                    new PublicGuiRenderInput.EntryValue(recipeId, result, values)));
+        }
+        browserContexts.put(player.getUniqueId(), new BrowserContext(returnPage, returnToCraft, recipeId));
+        publicGui.open(player, "focrafts.recipe-preview", new PublicGuiRenderInput(
+                values, Map.of(), Map.of(), entries));
+    }
 
-        fillInventory(player, inventory, gui.filler());
-        clearSlots(inventory, gui.gridSlots());
-        clearSlot(inventory, gui.resultSlot());
-        placeRecipeInGrid(inventory, recipe, gui.gridSlots());
-        inventory.setItem(gui.resultSlot(), recipeResultPreview(gui, player, recipe));
+    private void browserAction(PublicGuiClick click, String action) {
+        Player player = click.player();
+        BrowserContext context = browserContexts.get(player.getUniqueId());
+        if (context == null || context.recipeId() != null) return;
+        PlayerRecipeState state = getPlayerRecipeState(player);
+        switch (action) {
+            case "previous" -> {
+                plugin.getGuiSounds().previousPage(player);
+                openRecipeListGui(player, context.page() - 1, context.returnToCraft());
+            }
+            case "next" -> {
+                plugin.getGuiSounds().nextPage(player);
+                openRecipeListGui(player, context.page() + 1, context.returnToCraft());
+            }
+            case "search" -> {
+                if (click.clickKind() == ClickKind.RIGHT || click.clickKind() == ClickKind.SHIFT_RIGHT) {
+                    state.search = "";
+                    plugin.getGuiSounds().clearSearch(player);
+                    messages.send(player, "search-cleared", "");
+                    openRecipeListGui(player, 0, context.returnToCraft());
+                } else {
+                    plugin.getGuiSounds().search(player);
+                    startPrompt(player, PromptType.PLAYER_SEARCH, null, context.page(),
+                            publicLabel("search-chat-hint", Map.of(
+                                    "current", state.search.isBlank()
+                                            ? publicLabel("custom-recipes", "search-none") : state.search,
+                                    "format", publicLabel("search-format"),
+                                    "cancel_keyword", publicLabel("cancel-keyword"))),
+                            context.returnToCraft());
+                }
+            }
+            case "clear" -> {
+                state.search = "";
+                plugin.getGuiSounds().clearSearch(player);
+                messages.send(player, "search-cleared", "");
+                openRecipeListGui(player, 0, context.returnToCraft());
+            }
+            case "back" -> {
+                if (!context.returnToCraft()) return;
+                plugin.getGuiSounds().back(player);
+                openCraftGui(player, null, false);
+            }
+            case "sort" -> {
+                state.sort = state.sort.next();
+                plugin.getGuiSounds().sort(player);
+                openRecipeListGui(player, 0, context.returnToCraft());
+            }
+            default -> throw new IllegalArgumentException("Unknown browser action " + action);
+        }
+    }
 
-        placeItem(player, inventory, gui.details(), recipePreviewPlaceholders(gui, player, recipe),
-                Map.of("description", descriptionExpansion(gui.descriptionLine(), recipe)));
-        placeButton(inventory, gui.back(), buttons.back(player));
+    private void viewRecipe(PublicGuiClick click) {
+        BrowserContext context = browserContexts.get(click.player().getUniqueId());
+        if (context == null || context.recipeId() != null || click.entryId() == null) return;
+        Player player = click.player();
+        boolean stillVisible = getFilteredPlayerRecipes(player, getPlayerRecipeState(player)).stream()
+                .anyMatch(recipe -> recipe.getId().equals(click.entryId()));
+        if (!stillVisible) {
+            messages.send(player, "recipe-missing", "");
+            openRecipeListGui(player, context.page(), context.returnToCraft());
+            return;
+        }
+        plugin.getGuiSounds().open(player);
+        openRecipePreviewGui(player, click.entryId(), context.page(), context.returnToCraft());
+    }
 
-        openForViewer(player, inventory);
+    private void backFromPreview(PublicGuiClick click) {
+        BrowserContext context = browserContexts.get(click.player().getUniqueId());
+        if (context == null || context.recipeId() == null) return;
+        plugin.getGuiSounds().back(click.player());
+        openRecipeListGui(click.player(), context.page(), context.returnToCraft());
+    }
+
+    private String publicLabel(String key) {
+        return publicLabel(key, Map.of());
+    }
+
+    private String publicLabel(String key, Map<String, String> placeholders) {
+        return messages.render("public-gui." + key, "", placeholders);
+    }
+
+    private String publicLabel(String menu, String key) {
+        return publicLabel(menu, key, Map.of());
+    }
+
+    private String publicLabel(String menu, String key, Map<String, String> placeholders) {
+        String ownerPath = "public-gui.menu." + menu + "." + key;
+        return messages.config().contains(ownerPath)
+                ? messages.render(ownerPath, "", placeholders)
+                : publicLabel(key, placeholders);
+    }
+
+    private PublicText publicText(String menu) {
+        return new PublicText(publicLabel(menu, "no-permission"), publicLabel(menu, "type-shaped"),
+                publicLabel(menu, "type-shapeless"), publicLabel(menu, "match-material-only"),
+                publicLabel(menu, "match-material-meta"), publicLabel(menu, "match-strict-all"),
+                publicLabel(menu, "cost-none"), publicLabel(menu, "cost-levels", Map.of("amount", "{amount}")),
+                publicLabel(menu, "cost-points", Map.of("amount", "{amount}")),
+                publicLabel(menu, "cost-money", Map.of("amount", "{amount}")),
+                publicLabel(menu, "cost-separator"));
+    }
+
+    private Map<String, String> emptyPublicPlaceholders() {
+        Map<String, String> values = new HashMap<>();
+        for (String key : List.of("recipe_id", "recipe_name", "description", "permission", "type",
+                "match_mode", "cost", "locked", "max_craftable", "world", "status", "current",
+                "target", "page", "max_page", "material")) {
+            values.put(key, "");
+        }
+        return values;
+    }
+
+    private String previewStatus(Player player, CustomRecipe recipe) {
+        if (!hasRecipePermission(player, recipe)) return publicLabel("recipe-preview", "status-locked");
+        if (!isWorldAllowed(player, recipe)) return publicLabel("recipe-preview", "status-world-blocked");
+        return publicLabel("recipe-preview", "status-unlocked");
     }
 
     private void openAdminEditorGui(Player player, String recipeId, int returnPage) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(recipeId);
         if (optional.isEmpty()) {
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             openAdminListGui(player, returnPage);
             return;
         }
@@ -332,7 +690,7 @@ public final class GuiManager implements Listener {
     private void openAdminRecipeItemsGui(Player player, String recipeId, int returnPage) {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(recipeId);
         if (optional.isEmpty()) {
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             openAdminListGui(player, returnPage);
             return;
         }
@@ -457,22 +815,24 @@ public final class GuiManager implements Listener {
     }
 
     private void openCraftGui(Player player, CustomRecipe insertRecipe, boolean pullFromPlayerInventory) {
-        CustomCraftingGui gui = guiConfig.customCrafting();
-        CraftHolder holder = new CraftHolder(gui);
-        Inventory inventory = Bukkit.createInventory(holder, gui.size(), styleTitle(gui.title()));
-        holder.setInventory(inventory);
-
-        fillInventory(player, inventory, gui.filler());
-        clearSlots(inventory, gui.gridSlots());
-        clearSlot(inventory, gui.resultSlot());
-        placeItem(player, inventory, gui.browseRecipes(), Map.of());
-
-        if (insertRecipe != null && pullFromPlayerInventory) {
-            prefillCraftGridFromInventory(player, inventory, insertRecipe, gui.gridSlots());
+        if (publicGui.snapshot() == null) {
+            messages.send(player, "public-gui-unavailable", "");
+            return;
         }
-
+        Map<String, String> values = emptyPublicPlaceholders();
+        values.put("world", player.getWorld().getName());
+        PublicGuiFrame frame = publicGui.plan("focrafts.custom-crafting", new PublicGuiRenderInput(
+                values, Map.of(), Map.of(), Map.of()));
+        CraftHolder holder = new CraftHolder(frame);
+        Inventory inventory = Bukkit.createInventory(holder, frame.definition().size(),
+                DialogIcons.fallbackText(frame.title()));
+        holder.setInventory(inventory);
+        PublicGuiRenderer.renderInto(player, inventory, frame);
+        if (insertRecipe != null && pullFromPlayerInventory) {
+            prefillCraftGridFromInventory(player, inventory, insertRecipe, holder.gridSlots());
+        }
         refreshCraftPreview(player, inventory);
-        openForViewer(player, inventory);
+        player.openInventory(inventory);
     }
 
     @EventHandler
@@ -485,14 +845,6 @@ public final class GuiManager implements Listener {
 
         if (holder instanceof CraftHolder craftHolder) {
             handleCraftClick(event, player, top, craftHolder);
-            return;
-        }
-        if (holder instanceof RecipeListHolder recipeListHolder) {
-            handleRecipeListClick(event, player, recipeListHolder);
-            return;
-        }
-        if (holder instanceof RecipePreviewHolder previewHolder) {
-            handleRecipePreviewClick(event, player, previewHolder);
             return;
         }
         if (holder instanceof EntryBrowserHolder entryBrowserHolder) {
@@ -535,7 +887,7 @@ public final class GuiManager implements Listener {
                 if (rawSlot >= top.getSize()) {
                     continue;
                 }
-                if (!containsSlot(craftHolder.gui.gridSlots(), rawSlot)) {
+                if (!containsSlot(craftHolder.gridSlots(), rawSlot)) {
                     event.setCancelled(true);
                     return;
                 }
@@ -564,9 +916,7 @@ public final class GuiManager implements Listener {
             return;
         }
 
-        if (holder instanceof RecipeListHolder
-                || holder instanceof RecipePreviewHolder
-                || holder instanceof AdminListHolder
+        if (holder instanceof AdminListHolder
                 || holder instanceof AdminEditorHolder
                 || holder instanceof DeleteConfirmHolder
                 || holder instanceof TriStateSelectionHolder) {
@@ -583,12 +933,13 @@ public final class GuiManager implements Listener {
             return;
         }
 
-        if (currentCore().inventoryCloseSuppressor().consumeSuppressedClose(player)) {
+        if (holder instanceof CraftHolder craftHolder) {
+            // A stale editor-dialog suppression must never discard physical ingredients.
+            currentCore().inventoryCloseSuppressor().consumeSuppressedClose(player);
+            returnItems(player, inventory, craftHolder.gridSlots());
             return;
         }
-
-        if (holder instanceof CraftHolder craftHolder) {
-            returnItems(player, inventory, craftHolder.gui.gridSlots());
+        if (currentCore().inventoryCloseSuppressor().consumeSuppressedClose(player)) {
             return;
         }
         if (holder instanceof AdminRecipeItemsHolder recipeItemsHolder) {
@@ -610,8 +961,13 @@ public final class GuiManager implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
+        Inventory open = event.getPlayer().getOpenInventory().getTopInventory();
+        if (open.getHolder() instanceof CraftHolder craftHolder) {
+            returnItems(event.getPlayer(), open, craftHolder.gridSlots());
+        }
         UUID playerId = event.getPlayer().getUniqueId();
         playerRecipeStates.remove(playerId);
+        browserContexts.remove(playerId);
         adminListStates.remove(playerId);
         worldSelectionSessions.remove(playerId);
         currentCore().inventoryCloseSuppressor().clear(event.getPlayer());
@@ -621,15 +977,21 @@ public final class GuiManager implements Listener {
     private void handleCraftClick(InventoryClickEvent event, Player player, Inventory top, CraftHolder holder) {
         int raw = event.getRawSlot();
         boolean inTop = raw >= 0 && raw < top.getSize();
-        CustomCraftingGui gui = holder.gui;
-        boolean gridSlot = containsSlot(gui.gridSlots(), raw);
+        boolean gridSlot = containsSlot(holder.gridSlots(), raw);
 
+        // A bottom-inventory double click can collect from top grid slots without a grid click event.
+        if (event.getAction() == org.bukkit.event.inventory.InventoryAction.COLLECT_TO_CURSOR) {
+            event.setCancelled(true);
+            return;
+        }
         if (inTop && !gridSlot) {
             event.setCancelled(true);
         }
 
         if (!inTop && event.isShiftClick()) {
-            scheduleCraftPreviewUpdate(player, top);
+            event.setCancelled(true);
+            transferShiftToCraftGrid(event, top, holder.gridSlots());
+            refreshCraftPreview(player, top);
             return;
         }
 
@@ -637,12 +999,12 @@ public final class GuiManager implements Listener {
             return;
         }
 
-        if (raw == gui.resultSlot()) {
+        if (raw == holder.resultSlot()) {
             int amount = event.isShiftClick() ? Integer.MAX_VALUE : 1;
             CraftAttempt attempt = attemptCraft(player, top, amount);
             if (attempt.crafted > 0) {
                 plugin.getSounds().play(player, "craft.success");
-                messages.send(player, "craft-success", Map.of("amount", String.valueOf(attempt.crafted)));
+                messages.send(player, "craft-success", "", Map.of("amount", formatPublicNumber(attempt.crafted)));
             } else {
                 plugin.getSounds().play(player, "craft.error");
                 sendCraftFailure(player, attempt);
@@ -651,93 +1013,48 @@ public final class GuiManager implements Listener {
             return;
         }
 
-        if (raw == gui.browseRecipes().slot()) {
+        if (holder.frame.bindings().containsKey(raw)
+                && "craft.browse".equals(holder.frame.bindings().get(raw).actionFor(ClickKind.fromBukkit(event.getClick())))) {
             plugin.getGuiSounds().open(player);
             openRecipeListGui(player, 0, true);
             return;
         }
 
-        if (gridSlot) {
-            scheduleCraftPreviewUpdate(player, top);
-        }
+        if (gridSlot) scheduleCraftPreviewUpdate(player, top);
     }
 
-    private void handleRecipeListClick(InventoryClickEvent event, Player player, RecipeListHolder holder) {
-        event.setCancelled(true);
-        int raw = event.getRawSlot();
-        if (raw < 0 || raw >= event.getView().getTopInventory().getSize()) {
-            return;
+    private void transferShiftToCraftGrid(InventoryClickEvent event, Inventory top, List<Integer> slots) {
+        ItemStack source = normalize(event.getCurrentItem());
+        if (source == null || event.getClickedInventory() == null) return;
+        int remaining = source.getAmount();
+        for (int slot : slots) {
+            ItemStack target = normalize(top.getItem(slot));
+            if (target == null || !target.isSimilar(source)) continue;
+            int moved = Math.min(remaining, target.getMaxStackSize() - target.getAmount());
+            if (moved <= 0) continue;
+            target.setAmount(target.getAmount() + moved);
+            top.setItem(slot, target);
+            remaining -= moved;
+            if (remaining == 0) break;
         }
-
-        PlayerRecipeState state = getPlayerRecipeState(player);
-        List<CustomRecipe> recipes = getFilteredPlayerRecipes(player, state);
-        CustomRecipesGui gui = holder.gui;
-        int pageSize = Math.max(1, gui.contentSlots().size());
-        int maxPage = Math.max(0, (recipes.size() - 1) / pageSize);
-
-        int recipeSlotIndex = recipeListSlotIndex(raw, gui.contentSlots());
-        if (recipeSlotIndex >= 0) {
-            int index = holder.page * pageSize + recipeSlotIndex;
-            if (index < recipes.size()) {
-                plugin.getGuiSounds().open(player);
-                openRecipePreviewGui(player, recipes.get(index).getId(), holder.page, holder.returnToCraft);
+        if (remaining > 0) {
+            for (int slot : slots) {
+                if (normalize(top.getItem(slot)) != null) continue;
+                int moved = Math.min(remaining, source.getMaxStackSize());
+                ItemStack placed = source.clone();
+                placed.setAmount(moved);
+                top.setItem(slot, placed);
+                remaining -= moved;
+                if (remaining == 0) break;
             }
-            return;
         }
-
-        if (raw == gui.previousPage().slot() && holder.page > 0) {
-            plugin.getGuiSounds().previousPage(player);
-            openRecipeListGui(player, holder.page - 1, holder.returnToCraft);
-            return;
-        }
-        if (raw == gui.nextPage().slot() && holder.page < maxPage) {
-            plugin.getGuiSounds().nextPage(player);
-            openRecipeListGui(player, holder.page + 1, holder.returnToCraft);
-            return;
-        }
-        if (raw == gui.search().slot()) {
-            if (event.getClick().isRightClick()) {
-                state.search = "";
-                plugin.getGuiSounds().clearSearch(player);
-                messages.send(player, "search-cleared");
-                openRecipeListGui(player, 0, holder.returnToCraft);
-                return;
+        if (remaining != source.getAmount()) {
+            if (remaining == 0) {
+                event.getClickedInventory().setItem(event.getSlot(), null);
+            } else {
+                source.setAmount(remaining);
+                event.getClickedInventory().setItem(event.getSlot(), source);
             }
-            plugin.getGuiSounds().search(player);
-            startPrompt(player, PromptType.PLAYER_SEARCH, null, holder.page, "{theme}Type recipe search query in chat. Type {bad}cancel {theme}to cancel.", holder.returnToCraft);
-            return;
-        }
-        if (raw == gui.clearSearch().slot() && !state.search.isBlank()) {
-            state.search = "";
-            plugin.getGuiSounds().clearSearch(player);
-            messages.send(player, "search-cleared");
-            openRecipeListGui(player, 0, holder.returnToCraft);
-            return;
-        }
-        if (raw == gui.backToCraft().slot() && holder.returnToCraft) {
-            plugin.getGuiSounds().back(player);
-            openCraftGui(player, null, false);
-            return;
-        }
-        if (raw == gui.sort().slot()) {
-            state.sort = state.sort.next();
-            plugin.getGuiSounds().sort(player);
-            openRecipeListGui(player, 0, holder.returnToCraft);
-            return;
-        }
-    }
-
-    private void handleRecipePreviewClick(InventoryClickEvent event, Player player, RecipePreviewHolder holder) {
-        event.setCancelled(true);
-        int raw = event.getRawSlot();
-        if (raw < 0 || raw >= event.getView().getTopInventory().getSize()) {
-            return;
-        }
-
-        if (raw == holder.gui.back().slot()) {
-            plugin.getGuiSounds().back(player);
-            openRecipeListGui(player, holder.returnPage, holder.returnToCraft);
-            return;
         }
     }
 
@@ -765,7 +1082,7 @@ public final class GuiManager implements Listener {
             case CLEAR_SEARCH -> {
                 state.search = "";
                 plugin.getEditorSounds().clearSearch(player);
-                messages.send(player, "search-cleared");
+                messages.send(player, "search-cleared", "");
                 openAdminListGui(player, 0);
             }
             case PREVIOUS_PAGE -> {
@@ -816,7 +1133,7 @@ public final class GuiManager implements Listener {
             if (event.getClick().isRightClick()) {
                 state.search = "";
                 plugin.getEditorSounds().clearSearch(player);
-                messages.send(player, "search-cleared");
+                messages.send(player, "search-cleared", "");
                 openAdminListGui(player, 0);
                 return;
             }
@@ -827,7 +1144,7 @@ public final class GuiManager implements Listener {
         if (raw == ADMIN_CLEAR_SEARCH_SLOT && !state.search.isBlank()) {
             state.search = "";
             plugin.getEditorSounds().clearSearch(player);
-            messages.send(player, "search-cleared");
+            messages.send(player, "search-cleared", "");
             openAdminListGui(player, 0);
             return;
         }
@@ -871,7 +1188,7 @@ public final class GuiManager implements Listener {
             messages.send(player, "admin-deleted", Map.of("id", recipeId));
         } else {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
         }
         openAdminListGui(player, returnPage);
     }
@@ -890,7 +1207,7 @@ public final class GuiManager implements Listener {
 
         Optional<CustomRecipe> optional = recipeManager.getRecipe(holder.recipeId);
         if (optional.isEmpty()) {
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             openAdminListGui(player, holder.returnPage);
             return;
         }
@@ -1099,7 +1416,7 @@ public final class GuiManager implements Listener {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(session.recipeId());
         if (optional.isEmpty()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             worldSelectionSessions.remove(player.getUniqueId());
             openAdminListGui(player, session.returnPage());
             return;
@@ -1185,7 +1502,7 @@ public final class GuiManager implements Listener {
     }
 
     private CraftAttempt attemptCraft(Player player, Inventory inventory, int desiredCrafts) {
-        CustomCraftingGui gui = craftGui(inventory);
+        CraftHolder gui = (CraftHolder) inventory.getHolder();
         List<Integer> gridSlots = gui.gridSlots();
         ItemStack[] grid = readGrid(inventory, gridSlots);
         RecipeMatch match = recipeManager.findFirstMatch(grid, recipe -> canCraftRecipe(player, recipe));
@@ -1393,8 +1710,8 @@ public final class GuiManager implements Listener {
 
         if (levels > 0 && player.getLevel() < levels) {
             return new CostCheck(false, "craft-cost-xp", Map.of(
-                    "levels", String.valueOf(levels),
-                    "points", String.valueOf(points)
+                    "levels", formatPublicNumber(levels),
+                    "points", formatPublicNumber(points)
             ));
         }
 
@@ -1403,8 +1720,8 @@ public final class GuiManager implements Listener {
         int requiredTotalPoints = Math.max(0, points + levelCostInPoints);
         if (requiredTotalPoints > 0 && currentTotalExperience < requiredTotalPoints) {
             return new CostCheck(false, "craft-cost-xp", Map.of(
-                    "levels", String.valueOf(levels),
-                    "points", String.valueOf(points)
+                    "levels", formatPublicNumber(levels),
+                    "points", formatPublicNumber(points)
             ));
         }
 
@@ -1414,7 +1731,7 @@ public final class GuiManager implements Listener {
             }
             if (!vaultHook.has(player, money)) {
                 return new CostCheck(false, "craft-cost-money", Map.of(
-                        "money", NumberFormatters.compact(money)
+                        "money", formatPublicNumber(money)
                 ));
             }
         }
@@ -1479,10 +1796,10 @@ public final class GuiManager implements Listener {
 
     private void sendCraftFailure(Player player, CraftAttempt attempt) {
         if (attempt.messageKey == null) {
-            messages.send(player, "craft-no-match");
+            messages.send(player, "craft-no-match", "");
             return;
         }
-        messages.send(player, attempt.messageKey, attempt.placeholders);
+        messages.send(player, attempt.messageKey, "", attempt.placeholders);
     }
 
     private void prefillCraftGridFromInventory(Player player, Inventory inventory, CustomRecipe recipe, List<Integer> gridSlots) {
@@ -1560,7 +1877,7 @@ public final class GuiManager implements Listener {
     }
 
     private void placeRecipeInGrid(Inventory inventory, CustomRecipe recipe) {
-        placeRecipeInGrid(inventory, recipe, GuiConfig.DEFAULT_CRAFT_GRID_SLOTS);
+        placeRecipeInGrid(inventory, recipe, List.of(10, 11, 12, 19, 20, 21, 28, 29, 30));
     }
 
     private void placeRecipeInGrid(Inventory inventory, CustomRecipe recipe, List<Integer> gridSlots) {
@@ -1594,50 +1911,42 @@ public final class GuiManager implements Listener {
     }
 
     private void refreshCraftPreview(Player player, Inventory inventory) {
-        CustomCraftingGui gui = craftGui(inventory);
-        ItemStack[] grid = readGrid(inventory, gui.gridSlots());
+        CraftHolder holder = (CraftHolder) inventory.getHolder();
+        PublicGuiDefinition.Entry output = holder.frame.definition().entries().get("result");
+        ItemStack[] grid = readGrid(inventory, holder.gridSlots());
         RecipeMatch match = recipeManager.findFirstMatch(grid, recipe -> canCraftRecipe(player, recipe));
         if (match == null) {
             RecipeMatch restricted = recipeManager.findFirstMatch(grid);
-            if (restricted != null) {
-                if (!hasRecipePermission(player, restricted.recipe())) {
-                    setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(player, gui.lockedRecipe(), Map.of(
-                            "permission", configuredPermission(restricted.recipe())
-                    )));
-                    return;
-                }
-                if (!isWorldAllowed(player, restricted.recipe())) {
-                    setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(player, gui.worldBlocked(), Map.of(
-                            "world", player.getWorld().getName()
-                    )));
-                    return;
-                }
+            if (restricted != null && !hasRecipePermission(player, restricted.recipe())) {
+                Map<String, String> values = craftPlaceholders(publicText("custom-crafting"), restricted.recipe(),
+                        restricted.maxCraftable());
+                values.put("world", player.getWorld().getName());
+                inventory.setItem(holder.resultSlot(), PublicGuiRenderer.state(player, holder.frame, "locked", values));
+                return;
             }
-            setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(player, gui.noMatch(), Map.of()));
+            if (restricted != null && !isWorldAllowed(player, restricted.recipe())) {
+                Map<String, String> values = craftPlaceholders(publicText("custom-crafting"), restricted.recipe(),
+                        restricted.maxCraftable());
+                values.put("world", player.getWorld().getName());
+                inventory.setItem(holder.resultSlot(), PublicGuiRenderer.state(player, holder.frame,
+                        "world-blocked", values));
+                return;
+            }
+            inventory.setItem(holder.resultSlot(), PublicGuiItemRenderer.fixed(player, output.emptyItem(),
+                    emptyPublicPlaceholders(), null, null, "entries.result.empty-item"));
             return;
         }
-
         ItemStack result = normalize(match.recipe().getResult());
         if (result == null) {
-            setCraftResult(player, inventory, gui.resultSlot(), createConfiguredItem(player, gui.noMatch(), Map.of()));
+            inventory.setItem(holder.resultSlot(), PublicGuiItemRenderer.fixed(player, output.emptyItem(),
+                    emptyPublicPlaceholders(), null, null, "entries.result.empty-item"));
             return;
         }
-        ItemMeta meta = result.getItemMeta();
-        if (meta != null) {
-            ensureOutputName(result, meta);
-            meta.setLore(renderLore(player, gui.resultLore(), craftPlaceholders(match.recipe(), match.maxCraftable()), Map.of()));
-            result.setItemMeta(meta);
-        }
-        setCraftResult(player, inventory, gui.resultSlot(), result);
-    }
-
-    /**
-     * Preview items are inserted after the inventory was opened. Resolve the
-     * raw template for this viewer at that point as well, otherwise the
-     * no-match icon (and result lore) can remain as literal :material: text.
-     */
-    private void setCraftResult(Player player, Inventory inventory, int resultSlot, ItemStack item) {
-        inventory.setItem(resultSlot, item == null ? null : DialogIcons.forViewer(player, item));
+        Map<String, String> values = craftPlaceholders(publicText("custom-crafting"), match.recipe(), match.maxCraftable());
+        values.put("world", player.getWorld().getName());
+        inventory.setItem(holder.resultSlot(), PublicGuiItemRenderer.source(player, result,
+                output.sourceItem(), values,
+                "entries.result.source-item"));
     }
 
     private void refreshAdminEditorButtons(Player player, Inventory inventory, CustomRecipe recipe) {
@@ -1692,148 +2001,6 @@ public final class GuiManager implements Listener {
         return icon;
     }
 
-    private ItemStack recipeIcon(Player player, CustomRecipesGui gui, CustomRecipe recipe, boolean lockedForPlayer) {
-        Map<String, String> placeholders = recipePlaceholders(recipe, lockedForPlayer);
-        Map<String, List<String>> expansions = Map.of(
-                "description", descriptionExpansion(gui.descriptionLine(), recipe),
-                "locked", lockedExpansion(gui, lockedForPlayer)
-        );
-        ItemStack icon = normalize(recipe.getResult());
-        if (icon == null) {
-            return createConfiguredItem(player, gui.invalidRecipeItem(), placeholders, Map.of());
-        }
-        return createConfiguredItemFromStack(player, icon, gui.recipeItem(), placeholders, expansions);
-    }
-
-    private ItemStack recipeResultPreview(RecipePreviewGui gui, Player player, CustomRecipe recipe) {
-        ItemStack result = normalize(recipe.getResult());
-        if (result == null) {
-            return createConfiguredItem(player, gui.invalidResult(), recipePreviewPlaceholders(gui, player, recipe), Map.of());
-        }
-
-        ItemMeta meta = result.getItemMeta();
-        if (meta != null) {
-            ensureOutputName(result, meta);
-            meta.setLore(renderLore(player, gui.resultLore(), recipePreviewPlaceholders(gui, player, recipe), Map.of()));
-            result.setItemMeta(meta);
-        }
-        return result;
-    }
-
-    private void ensureOutputName(ItemStack item, ItemMeta meta) {
-        if (hasVisibleItemName(meta.hasDisplayName() ? meta.getDisplayName() : null)
-                || hasVisibleItemName(meta.hasItemName() ? meta.getItemName() : null)) {
-            return;
-        }
-        meta.setDisplayName(color("{white}" + formatMaterial(item.getType())));
-    }
-
-    private boolean hasVisibleItemName(String name) {
-        if (name == null || name.isBlank()) {
-            return false;
-        }
-        return DialogIcons.containsToken(name)
-                || !DialogIcons.fallbackText(DialogIcons.render(name)).isBlank();
-    }
-
-    private ItemStack createConfiguredItem(Player player, GuiItem item, Map<String, String> placeholders) {
-        return createConfiguredItem(player, item, placeholders, Map.of());
-    }
-
-    private ItemStack createConfiguredItem(Player player, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
-        ItemStack stack = new ItemStack(item.material(), item.amount());
-        return applyConfiguredItem(player, stack, item, placeholders, expansions, false);
-    }
-
-    private ItemStack createConfiguredItemFromStack(Player player, ItemStack base, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
-        ItemStack stack = normalize(base);
-        if (stack == null) {
-            stack = new ItemStack(item.material(), item.amount());
-            return applyConfiguredItem(player, stack, item, placeholders, expansions, false);
-        }
-        return applyConfiguredItem(player, stack, item, placeholders, expansions, true);
-    }
-
-    @SuppressWarnings("deprecation")
-    private ItemStack applyConfiguredItem(Player player, ItemStack stack, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions, boolean preserveAmount) {
-        if (!preserveAmount) {
-            stack.setAmount(item.amount());
-        }
-
-        ItemMeta meta = stack.getItemMeta();
-        if (meta == null) {
-            return stack;
-        }
-
-        String renderedName = renderLine(player, item.name(), placeholders);
-        List<String> renderedLore = renderLore(player, item.lore(), placeholders, expansions);
-        String iconizedName = DialogIcons.withMaterialIcon(renderedName, item.material());
-        if (!DialogIcons.applyItemMeta(meta, player, iconizedName, renderedLore)) {
-            meta.setDisplayName(DialogIcons.fallbackText(DialogIcons.render(player, iconizedName)));
-            meta.setLore(renderedLore.stream()
-                    .map(line -> DialogIcons.fallbackText(DialogIcons.render(player, line)))
-                    .toList());
-        }
-        if (item.customModelData() != null) {
-            meta.setCustomModelData(item.customModelData());
-        }
-        if (!item.flags().isEmpty()) {
-            meta.addItemFlags(item.flags().toArray(ItemFlag[]::new));
-        }
-        if (item.glow()) {
-            meta.addEnchant(Enchantment.UNBREAKING, 1, true);
-            meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
-        }
-        stack.setItemMeta(meta);
-        return stack;
-    }
-
-    private void fillInventory(Player player, Inventory inventory, GuiItem filler) {
-        ItemStack item = createConfiguredItem(player, filler, Map.of());
-        for (int slot = 0; slot < inventory.getSize(); slot++) {
-            inventory.setItem(slot, item.clone());
-        }
-    }
-
-    private void fillSlots(Player player, Inventory inventory, List<Integer> slots, GuiItem filler) {
-        ItemStack item = createConfiguredItem(player, filler, Map.of());
-        for (int slot : slots) {
-            if (isValidSlot(inventory, slot)) {
-                inventory.setItem(slot, item.clone());
-            }
-        }
-    }
-
-    private void clearSlots(Inventory inventory, List<Integer> slots) {
-        for (int slot : slots) {
-            clearSlot(inventory, slot);
-        }
-    }
-
-    private void clearSlot(Inventory inventory, int slot) {
-        if (isValidSlot(inventory, slot)) {
-            inventory.setItem(slot, null);
-        }
-    }
-
-    private void placeButton(Inventory inventory, GuiButtonSlot button, ItemStack item) {
-        if (button == null || item == null || !isValidSlot(inventory, button.slot())) {
-            return;
-        }
-        inventory.setItem(button.slot(), FoItemStacks.cloneItem(item));
-    }
-
-    private void placeItem(Player player, Inventory inventory, GuiItem item, Map<String, String> placeholders) {
-        placeItem(player, inventory, item, placeholders, Map.of());
-    }
-
-    private void placeItem(Player player, Inventory inventory, GuiItem item, Map<String, String> placeholders, Map<String, List<String>> expansions) {
-        if (item == null || !isValidSlot(inventory, item.slot())) {
-            return;
-        }
-        inventory.setItem(item.slot(), createConfiguredItem(player, item, placeholders, expansions));
-    }
-
     private boolean isValidSlot(Inventory inventory, int slot) {
         return slot >= 0 && slot < inventory.getSize();
     }
@@ -1847,22 +2014,6 @@ public final class GuiManager implements Listener {
             return -1;
         }
         return slots.get(index);
-    }
-
-    private int recipeListSlotIndex(int rawSlot, List<Integer> slots) {
-        for (int index = 0; index < slots.size(); index++) {
-            if (slots.get(index) == rawSlot) {
-                return index;
-            }
-        }
-        return -1;
-    }
-
-    private CustomCraftingGui craftGui(Inventory inventory) {
-        if (inventory.getHolder() instanceof CraftHolder holder) {
-            return holder.gui;
-        }
-        return guiConfig.customCrafting();
     }
 
     private ItemStack[] readGrid(Inventory inventory, List<Integer> gridSlots) {
@@ -1890,108 +2041,54 @@ public final class GuiManager implements Listener {
         }
     }
 
-    private List<String> sortOptionLines(Player player, CustomRecipesGui gui, SortMode selected) {
-        List<String> information = new ArrayList<>();
-        for (SortMode mode : SortMode.values()) {
-            String template = mode == selected ? gui.sortSelectedLine() : gui.sortUnselectedLine();
-            information.add(renderLine(player, template, Map.of("sort", mode.displayName)));
-        }
-        return FoButtonStyle.buttonLore(information, "cycle");
+    private Map<String, String> pagePlaceholders(int page, int maxPage) {
+        return Map.of(
+                "page", formatPublicNumber(page + 1),
+                "max_page", formatPublicNumber(maxPage + 1)
+        );
     }
 
-    private List<String> descriptionExpansion(String template, CustomRecipe recipe) {
-        if (template == null || template.isBlank() || safe(recipe.getDescription()).isBlank()) {
-            return List.of();
-        }
-        return List.of(template);
-    }
-
-    private List<String> lockedExpansion(CustomRecipesGui gui, boolean lockedForPlayer) {
-        if (!lockedForPlayer || gui.lockedLine() == null || gui.lockedLine().isBlank()) {
-            return List.of();
-        }
-        return List.of(gui.lockedLine());
-    }
-
-    private Map<String, String> recipePlaceholders(CustomRecipe recipe, boolean lockedForPlayer) {
+    private Map<String, String> recipePlaceholders(PublicText text, CustomRecipe recipe, boolean lockedForPlayer) {
         Map<String, String> placeholders = new HashMap<>();
         placeholders.put("recipe_id", safe(recipe.getId()));
         placeholders.put("recipe_name", recipeName(recipe));
         placeholders.put("description", safe(recipe.getDescription()));
-        placeholders.put("permission", configuredPermission(recipe));
-        placeholders.put("type", recipe.getType() == null ? "" : recipe.getType().name());
-        placeholders.put("match_mode", recipe.getMatchMode() == null ? "" : recipe.getMatchMode().name());
-        placeholders.put("cost", formatCost(recipe.getCost()));
-        placeholders.put("locked", lockedForPlayer ? "true" : "false");
+        placeholders.put("permission", configuredPermission(text, recipe));
+        placeholders.put("type", publicRecipeTypeLabel(text, recipe.getType()));
+        placeholders.put("match_mode", publicMatchModeLabel(text, recipe.getMatchMode()));
+        placeholders.put("cost", formatCost(text, recipe.getCost()));
+        placeholders.put("locked", publicLabel(lockedForPlayer ? "status-locked" : "status-unlocked"));
+        ItemStack result = normalize(recipe.getResult());
+        placeholders.put("material", result == null ? "" : result.getType().name());
         return placeholders;
     }
 
-    private Map<String, String> recipePreviewPlaceholders(RecipePreviewGui gui, Player player, CustomRecipe recipe) {
-        Map<String, String> placeholders = new HashMap<>(recipePlaceholders(recipe, !hasRecipePermission(player, recipe)));
-        placeholders.put("status", previewStatus(gui, player, recipe));
+    private Map<String, String> craftPlaceholders(PublicText text, CustomRecipe recipe, int maxCraftable) {
+        Map<String, String> placeholders = new HashMap<>(recipePlaceholders(text, recipe, false));
+        placeholders.put("max_craftable", formatPublicNumber(maxCraftable));
         return placeholders;
     }
 
-    private Map<String, String> craftPlaceholders(CustomRecipe recipe, int maxCraftable) {
-        Map<String, String> placeholders = new HashMap<>(recipePlaceholders(recipe, false));
-        placeholders.put("max_craftable", String.valueOf(maxCraftable));
-        return placeholders;
-    }
-
-    private String configuredPermission(CustomRecipe recipe) {
+    private String configuredPermission(PublicText text, CustomRecipe recipe) {
         String permission = recipe.getPermission();
-        return permission == null || permission.isBlank() ? "none" : permission;
+        return permission == null || permission.isBlank() ? text.noPermission() : permission;
+    }
+
+    private String publicRecipeTypeLabel(PublicText text, RecipeType type) {
+        return type == RecipeType.SHAPELESS ? text.typeShapeless() : text.typeShaped();
+    }
+
+    private String publicMatchModeLabel(PublicText text, RecipeMatchMode mode) {
+        return switch (mode == null ? RecipeMatchMode.MATERIAL_META : mode) {
+            case MATERIAL_ONLY -> text.matchMaterialOnly();
+            case MATERIAL_META -> text.matchMaterialMeta();
+            case STRICT_ALL -> text.matchStrictAll();
+        };
     }
 
     private String recipeName(CustomRecipe recipe) {
         String name = recipe.getDisplayName();
         return name == null || name.isBlank() ? safe(recipe.getId()) : name;
-    }
-
-    private String previewStatus(RecipePreviewGui gui, Player player, CustomRecipe recipe) {
-        if (!hasRecipePermission(player, recipe)) {
-            return gui.lockedStatus();
-        }
-        if (!isWorldAllowed(player, recipe)) {
-            return gui.worldBlockedStatus();
-        }
-        return gui.unlockedStatus();
-    }
-
-    private List<String> renderLore(Player player, List<String> lore, Map<String, String> placeholders, Map<String, List<String>> expansions) {
-        if (lore == null || lore.isEmpty()) {
-            return List.of();
-        }
-        List<String> rendered = new ArrayList<>();
-        for (String line : lore) {
-            String expansionKey = expansionKey(line);
-            if (expansionKey != null && expansions.containsKey(expansionKey)) {
-                for (String expandedLine : expansions.get(expansionKey)) {
-                    rendered.add(renderLine(player, expandedLine, placeholders));
-                }
-                continue;
-            }
-            rendered.add(renderLine(player, line, placeholders));
-        }
-        return rendered;
-    }
-
-    private String expansionKey(String line) {
-        if (line == null) {
-            return null;
-        }
-        String trimmed = line.trim();
-        if (!trimmed.startsWith("{") || !trimmed.endsWith("}") || trimmed.length() < 3) {
-            return null;
-        }
-        String key = trimmed.substring(1, trimmed.length() - 1);
-        return key.matches("[A-Za-z0-9_-]+") ? key : null;
-    }
-
-    private String renderLine(Player player, String input, Map<String, String> placeholders) {
-        return messages.renderTemplateForViewer(
-                player,
-                CommandPlaceholders.apply(input == null ? "" : input, placeholders), Map.of());
     }
 
     private String safe(String value) {
@@ -2157,6 +2254,11 @@ public final class GuiManager implements Listener {
         saveOpenEditorBeforePrompt(player, recipeId);
         ChatPrompt prompt = new ChatPrompt(type, recipeId, returnPage, returnToCraft);
         textFallback.rememberHint(player, hint);
+        if ((type == PromptType.PLAYER_SEARCH || type == PromptType.ADMIN_SEARCH) && !textDialogs.available()) {
+            textFallback.open(player, searchDialogRequest("", ""),
+                    input -> handleChatPrompt(player, prompt, input), () -> cancelPrompt(player, prompt));
+            return;
+        }
         boolean openedNative = EditorDialogInputs.openTextFromInventory(
                 plugin,
                 currentCore().inventoryCloseSuppressor(),
@@ -2197,7 +2299,7 @@ public final class GuiManager implements Listener {
         );
 
         if (prompt.type == PromptType.PLAYER_SEARCH || prompt.type == PromptType.ADMIN_SEARCH) {
-            TextDialogRequest request = textDialogs.request("search", searchDialogRequest("{current}", "{format}"), replacements);
+            TextDialogRequest request = textDialogs.request(replacements);
             return formatRequest(request, Map.of());
         }
         return formatRequest(editorDialogRequest(prompt.type), replacements);
@@ -2306,7 +2408,7 @@ public final class GuiManager implements Listener {
     private String promptTitle(PromptType type) {
         return switch (type) {
             case CREATE_RECIPE_NAME -> "Create Recipe";
-            case PLAYER_SEARCH -> "Recipe Search";
+            case PLAYER_SEARCH -> publicLabel("search-title");
             case ADMIN_SEARCH -> "Admin Recipe Search";
             case EDIT_NAME -> "Recipe Name";
             case EDIT_PERMISSION -> "Recipe Permission";
@@ -2319,7 +2421,8 @@ public final class GuiManager implements Listener {
     private String promptFormat(PromptType type) {
         return switch (type) {
             case CREATE_RECIPE_NAME -> "Non-empty recipe display name";
-            case PLAYER_SEARCH, ADMIN_SEARCH -> "Any search text";
+            case PLAYER_SEARCH -> publicLabel("search-format");
+            case ADMIN_SEARCH -> "Any search text";
             case EDIT_NAME -> "Non-empty recipe display name";
             case EDIT_PERMISSION -> "Permission node or none";
             case EDIT_DESCRIPTION -> "Description text or none";
@@ -2360,12 +2463,12 @@ public final class GuiManager implements Listener {
 
     private void cancelPrompt(Player player, ChatPrompt prompt) {
         plugin.getEditorSounds().back(player);
-        messages.send(player, "chat-prompt-cancelled");
+        messages.send(player, "chat-prompt-cancelled", "");
         reopenPromptOrigin(player, prompt);
     }
 
     private void handleChatPrompt(Player player, ChatPrompt prompt, String input) {
-        if (input.equalsIgnoreCase("cancel")) {
+        if (input.equalsIgnoreCase(publicLabel("cancel-keyword"))) {
             cancelPrompt(player, prompt);
             return;
         }
@@ -2394,7 +2497,7 @@ public final class GuiManager implements Listener {
         String name = input.trim();
         if (name.isBlank()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "chat-prompt-invalid");
+            messages.send(player, "chat-prompt-invalid", "");
             reopenPromptOrigin(player, prompt);
             return;
         }
@@ -2418,7 +2521,7 @@ public final class GuiManager implements Listener {
         String name = input.trim();
         if (name.isBlank()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "chat-prompt-invalid");
+            messages.send(player, "chat-prompt-invalid", "");
             reopenPromptOrigin(player, prompt);
             return;
         }
@@ -2426,7 +2529,7 @@ public final class GuiManager implements Listener {
         Optional<CustomRecipe> renamed = recipeManager.renameRecipe(prompt.recipeId, name);
         if (renamed.isEmpty()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             return;
         }
 
@@ -2440,13 +2543,13 @@ public final class GuiManager implements Listener {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             return;
         }
         String value = input.trim();
         if (value.isBlank()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "chat-prompt-invalid");
+            messages.send(player, "chat-prompt-invalid", "");
             reopenPromptOrigin(player, prompt);
             return;
         }
@@ -2462,7 +2565,7 @@ public final class GuiManager implements Listener {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             return;
         }
         String value = input.trim();
@@ -2481,7 +2584,7 @@ public final class GuiManager implements Listener {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             return;
         }
         String value = input.trim();
@@ -2500,14 +2603,14 @@ public final class GuiManager implements Listener {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             return;
         }
 
         String[] split = input.trim().split("\\s+");
         if (split.length != 3) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "chat-prompt-invalid");
+            messages.send(player, "chat-prompt-invalid", "");
             reopenPromptOrigin(player, prompt);
             return;
         }
@@ -2519,7 +2622,7 @@ public final class GuiManager implements Listener {
                     .orElseThrow(() -> new NumberFormatException("Invalid money amount"));
             if (levels < 0 || points < 0 || money < 0) {
                 plugin.getEditorSounds().error(player);
-                messages.send(player, "chat-prompt-invalid");
+                messages.send(player, "chat-prompt-invalid", "");
                 reopenPromptOrigin(player, prompt);
                 return;
             }
@@ -2532,7 +2635,7 @@ public final class GuiManager implements Listener {
             refreshOpenEditorIfMatching(player, recipe, prompt);
         } catch (NumberFormatException ignored) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "chat-prompt-invalid");
+            messages.send(player, "chat-prompt-invalid", "");
             reopenPromptOrigin(player, prompt);
         }
     }
@@ -2541,7 +2644,7 @@ public final class GuiManager implements Listener {
         Optional<CustomRecipe> optional = recipeManager.getRecipe(prompt.recipeId);
         if (optional.isEmpty()) {
             plugin.getEditorSounds().error(player);
-            messages.send(player, "recipe-missing");
+            messages.send(player, "recipe-missing", "");
             return;
         }
 
@@ -2740,6 +2843,35 @@ public final class GuiManager implements Listener {
         return String.join(", ", parts);
     }
 
+    private String formatCost(PublicText text, RecipeCost cost) {
+        if (cost == null || !cost.hasAnyCost()) {
+            return text.costNone();
+        }
+        List<String> parts = new ArrayList<>();
+        if (cost.getXpLevels() > 0) {
+            parts.add(formatAmountLabel(text.costLevels(), formatPublicNumber(cost.getXpLevels())));
+        }
+        if (cost.getXpPoints() > 0) {
+            parts.add(formatAmountLabel(text.costPoints(), formatPublicNumber(cost.getXpPoints())));
+        }
+        if (cost.getVaultMoney() > 0.0D) {
+            parts.add(formatAmountLabel(text.costMoney(), formatPublicNumber(cost.getVaultMoney())));
+        }
+        return String.join(text.costSeparator(), parts);
+    }
+
+    private String formatAmountLabel(String template, String amount) {
+        return CommandPlaceholders.apply(template, Map.of("amount", amount));
+    }
+
+    private String formatPublicNumber(double value) {
+        String tag = publicLabel("number-locale");
+        Locale locale = Locale.forLanguageTag(tag);
+        NumberFormat format = NumberFormat.getNumberInstance(locale);
+        format.setMaximumFractionDigits(2);
+        return format.format(value);
+    }
+
     private String styleTitle(String fallback) {
         return GuiTitles.format(fallback);
     }
@@ -2762,39 +2894,28 @@ public final class GuiManager implements Listener {
     }
 
     private static final class CraftHolder extends BaseHolder {
-        private final CustomCraftingGui gui;
+        private final PublicGuiFrame frame;
 
-        private CraftHolder(CustomCraftingGui gui) {
-            this.gui = gui;
+        private CraftHolder(PublicGuiFrame frame) {
+            this.frame = frame;
+        }
+
+        private List<Integer> gridSlots() {
+            return frame.definition().requireGroup("grid-slots");
+        }
+
+        private int resultSlot() {
+            return frame.definition().entries().get("result").slots().getFirst();
         }
     }
 
-    private static final class RecipeListHolder extends BaseHolder {
-        private final int page;
-        private final String search;
-        private final SortMode sort;
-        private final boolean returnToCraft;
-        private final CustomRecipesGui gui;
-
-        private RecipeListHolder(int page, String search, SortMode sort, boolean returnToCraft, CustomRecipesGui gui) {
-            this.page = page;
-            this.search = search;
-            this.sort = sort;
-            this.returnToCraft = returnToCraft;
-            this.gui = gui;
-        }
+    private record BrowserContext(int page, boolean returnToCraft, String recipeId) {
     }
 
-    private static final class RecipePreviewHolder extends BaseHolder {
-        private final int returnPage;
-        private final boolean returnToCraft;
-        private final RecipePreviewGui gui;
-
-        private RecipePreviewHolder(int returnPage, boolean returnToCraft, RecipePreviewGui gui) {
-            this.returnPage = returnPage;
-            this.returnToCraft = returnToCraft;
-            this.gui = gui;
-        }
+    private record PublicText(String noPermission, String typeShaped, String typeShapeless,
+                              String matchMaterialOnly, String matchMaterialMeta, String matchStrictAll,
+                              String costNone, String costLevels, String costPoints,
+                              String costMoney, String costSeparator) {
     }
 
     private static final class AdminListHolder extends BaseHolder {

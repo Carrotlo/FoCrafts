@@ -1,0 +1,83 @@
+# Public custom crafting GUI.
+# Slots are 0-based. Inventory rows must be 1-6. Invalid slots/materials fall back safely.
+# The bundled title uses Fo small caps; configured title text is preserved as written.
+# Common item keys: slot, material, amount, name, lore, custom-model-data, glow, flags.
+
+schema-version: 1
+title: "ᴄᴜꜱᴛᴏᴍ ᴄʀᴀꜰᴛɪɴɢ"
+rows: 6
+
+# The 3x3 input grid. Must contain exactly 9 valid slots.
+grid-slots:
+  - 10
+  - 11
+  - 12
+  - 19
+  - 20
+  - 21
+  - 28
+  - 29
+  - 30
+
+result-slot: 24
+
+filler:
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+
+items:
+  browse-recipes:
+    slot: 49
+    material: BOOK
+    name: "{theme}&lBROWSE RECIPES"
+    lore:
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "&7&l | &fOpen the recipe browser."
+      - " "
+      - "{good}→ Click to Browse Recipes ←"
+
+result-items:
+  no-match:
+    material: GRAY_DYE
+    name: "{muted}No matching recipe"
+    lore:
+      - "{white}Place items in the grid to craft."
+  locked:
+    material: BARRIER
+    name: "{bad}Locked recipe"
+    lore:
+      - "{white}Missing permission:"
+      - "{theme}{permission}"
+  world-blocked:
+    material: BARRIER
+    name: "{bad}World restricted"
+    lore:
+      - "{white}Cannot craft this recipe in"
+      - "{theme}{world}"
+
+# Applied to the real result item when the grid matches a recipe.
+# Valid placeholders: {recipe_id}, {recipe_name}, {max_craftable}, {cost}, {permission}.
+result-item:
+  # Leave blank to preserve Minecraft's client-translated vanilla item name.
+  # Set a template to override unnamed results. Valid placeholder: {material}.
+  unnamed-name: ""
+  lore:
+    - "{white}Costs: {theme}{cost}"
+    - "{white}Click to Craft"
+    - "{white}Shift Click to Craft Multiple"
+
+# Dynamic labels used by placeholders in this file. These are templates, not new behavior choices.
+labels:
+  no-permission: "none"
+  type-shaped: "Shaped"
+  type-shapeless: "Shapeless"
+  match-material-only: "Material Only"
+  match-material-meta: "Material + Meta"
+  match-strict-all: "Strict All"
+  cost-none: "none"
+  cost-levels: "{amount} levels"
+  cost-points: "{amount} xp"
+  cost-money: "${amount}"
+  cost-separator: ", "

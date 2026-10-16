@@ -1,78 +1,176 @@
-# Public custom recipes browser GUI.
-# Slots are 0-based. Inventory rows must be 1-6. Invalid slots/materials fall back safely.
-# Titles are rendered small caps in code to match Fo GUI style.
-# Common item keys: slot, material, amount, name, lore, custom-model-data, glow, flags.
-
 title: "ᴄᴜꜱᴛᴏᴍ ʀᴇᴄɪᴘᴇꜱ"
 rows: 6
-
-# Dynamic recipe entries render in these slots.
-content-slots:
-  - 10
-  - 11
-  - 12
-  - 13
-  - 14
-  - 15
-  - 16
-  - 19
-  - 20
-  - 21
-  - 22
-  - 23
-  - 24
-  - 25
-  - 28
-  - 29
-  - 30
-  - 31
-  - 32
-  - 33
-  - 34
-
 filler:
-  material: GRAY_STAINED_GLASS_PANE
+  enabled: true
+  material: "GRAY_STAINED_GLASS_PANE"
   name: " "
-
-empty-content:
-  material: LIGHT_GRAY_STAINED_GLASS_PANE
-  name: " "
-
-items:
+buttons:
   previous-page:
     slot: 45
+    enabled: true
+    material: "ARROW"
+    name: "{theme}&lPREVIOUS PAGE"
+    lore:
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "&7&l | &fPage {page}/{max_page}"
+      - " "
+      - "{good}→ Click to View the Previous Page ←"
+    action: "recipes.previous"
+    states:
+      unavailable:
+        clickable: false
+        material: "GRAY_STAINED_GLASS_PANE"
+        name: " "
   next-page:
     slot: 53
+    enabled: true
+    material: "ARROW"
+    name: "{theme}&lNEXT PAGE"
+    lore:
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "&7&l | &fPage {page}/{max_page}"
+      - " "
+      - "{good}→ Click to View the Next Page ←"
+    action: "recipes.next"
+    states:
+      unavailable:
+        clickable: false
+        material: "GRAY_STAINED_GLASS_PANE"
+        name: " "
   search:
     slot: 51
+    enabled: true
+    material: "NAME_TAG"
+    name: "&e&lSEARCH"
+    lore:
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "&7&l | &fCurrent: {current}"
+      - " "
+      - "{good}→ Click to Set a Filter ←"
+    action: "recipes.search"
   clear-search:
     slot: 52
+    enabled: true
+    material: "MILK_BUCKET"
+    name: "{theme}&lCLEAR SEARCH"
+    lore:
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "&7&l | &fShow all {target}."
+      - " "
+      - "{good}→ Click to Clear the Search ←"
+    action: "recipes.clear-search"
+    states:
+      unavailable:
+        clickable: false
+        material: "GRAY_STAINED_GLASS_PANE"
+        name: " "
   back-to-craft:
     slot: 49
+    enabled: true
+    material: "IRON_DOOR"
+    name: "&e&lBACK"
+    lore:
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "&7&l | &fReturn to the crafting menu."
+      - " "
+      - "{good}→ Click to Go Back ←"
+    action: "recipes.back"
+    states:
+      unavailable:
+        clickable: false
+        material: "GRAY_STAINED_GLASS_PANE"
+        name: " "
   sort:
     slot: 48
-    material: CLOCK
+    enabled: true
+    material: "CLOCK"
     name: "{theme}&lSORT"
     lore:
-      - "{sort_options}"
-    # Valid placeholder for these lines: {sort}.
-    selected-line: "{theme}» {sort}"
-    unselected-line: "{white}• {sort}"
-
-# Dynamic recipe entry. The real recipe result item is used when available.
-# Valid placeholders: {recipe_id}, {recipe_name}, {description}, {permission}, {type}, {match_mode}, {locked}.
-recipe-item:
-  material: BARRIER
-  name: "{theme}{recipe_name}"
-  lore:
-    - "{description}"
-    - "{locked}"
-    - "{white}Click to view this recipe."
-  description-line: "{white}Desc: {theme}{description}"
-  locked-line: "{bad}Locked: missing permission"
-
-invalid-recipe-item:
-  material: BARRIER
-  name: "{bad}Invalid result"
-  lore:
-    - "{white}This recipe has no valid result item."
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "{options}"
+      - " "
+      - "{good}→ Click to Cycle Sort ←"
+    action: "recipes.sort"
+    cycle:
+      selected-format: "{theme}» {option}"
+      unselected-format: "{white}• {option}"
+entries:
+  recipes:
+    slots:
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      - 16
+      - 19
+      - 20
+      - 21
+      - 22
+      - 23
+      - 24
+      - 25
+      - 28
+      - 29
+      - 30
+      - 31
+      - 32
+      - 33
+      - 34
+    source-item:
+      default-name: "{recipe_name}"
+      lore-states:
+        both:
+          mode: "replace"
+          lines:
+            - "{description}"
+            - "{locked}"
+            - "{white}Click to view this recipe."
+        description-only:
+          mode: "replace"
+          lines:
+            - "{description}"
+            - "{white}Click to view this recipe."
+        locked-only:
+          mode: "replace"
+          lines:
+            - "{locked}"
+            - "{white}Click to view this recipe."
+        plain:
+          mode: "replace"
+          lines:
+            - "{white}Click to view this recipe."
+        invalid:
+          mode: "preserve"
+    empty-item:
+      material: "LIGHT_GRAY_STAINED_GLASS_PANE"
+      name: " "
+    actions:
+      left: "recipes.view"
+      right: "recipes.view"
+      shift-left: "recipes.view"
+      shift-right: "recipes.view"
+      drop: "recipes.view"
+      control-drop: "recipes.view"
+      middle: "recipes.view"
+      number-key: "recipes.view"
+      swap-offhand: "recipes.view"
+states:
+  invalid-recipe:
+    material: "BARRIER"
+    name: "{bad}Invalid result"
+    lore:
+      - "{white}This recipe has no valid result item."

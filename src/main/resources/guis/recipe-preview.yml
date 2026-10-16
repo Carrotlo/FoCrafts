@@ -1,57 +1,56 @@
-# Public recipe preview GUI.
-# Slots are 0-based. Inventory rows must be 1-6. Invalid slots/materials fall back safely.
-# Titles are rendered small caps in code to match Fo GUI style.
-# Common item keys: slot, material, amount, name, lore, custom-model-data, glow, flags.
-
 title: "ʀᴇᴄɪᴘᴇ ᴘʀᴇᴠɪᴇᴡ"
 rows: 6
-
-# The 3x3 recipe ingredient preview. Must contain exactly 9 valid slots.
-grid-slots:
-  - 10
-  - 11
-  - 12
-  - 19
-  - 20
-  - 21
-  - 28
-  - 29
-  - 30
-
-result-slot: 24
-
 filler:
-  material: GRAY_STAINED_GLASS_PANE
+  enabled: true
+  material: "GRAY_STAINED_GLASS_PANE"
   name: " "
-
-items:
+buttons:
+  back:
+    slot: 49
+    enabled: true
+    material: "IRON_DOOR"
+    name: "&e&lBACK"
+    lore:
+      - "&8ʙᴜᴛᴛᴏɴ"
+      - " "
+      - "&eⓘ Information ↓"
+      - "&7&l | &fReturn to the recipe browser."
+      - " "
+      - "{good}→ Click to Go Back ←"
+    action: "preview.back"
+decorations:
   details:
-    slot: 47
-    material: BOOK
+    slots:
+      - 47
+    material: "BOOK"
     name: "{theme}{recipe_name}"
     lore:
       - "{description}"
       - "{white}Costs: {theme}{cost}"
       - "{white}Status: {status}"
-  back:
-    slot: 49
-
-invalid-result-item:
-  material: BARRIER
-  name: "{bad}Invalid result"
-  lore:
-    - "{white}This recipe has no valid result item."
-
-# Applied to the real result item.
-# Valid placeholders: {recipe_id}, {recipe_name}, {cost}, {permission}, {status}.
-result-item:
-  lore:
-    - "{white}This is the output item."
-
-# Valid placeholder: {description}.
-description-line: "{white}Description: {theme}{description}"
-
-status:
-  unlocked: "{good}Unlocked"
-  locked: "{bad}Locked"
-  world-blocked: "{bad}World restricted"
+entries:
+  ingredients:
+    slots:
+      - 10
+      - 11
+      - 12
+      - 19
+      - 20
+      - 21
+      - 28
+      - 29
+      - 30
+    source-item: {}
+  result:
+    slots:
+      - 24
+    source-item:
+      lore:
+        mode: "replace"
+        lines:
+          - "{white}This is the output item."
+    empty-item:
+      material: "BARRIER"
+      name: "{bad}Invalid result"
+      lore:
+        - "{white}This recipe has no valid result item."

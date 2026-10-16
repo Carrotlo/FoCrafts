@@ -10,7 +10,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Set;
 
@@ -20,11 +22,14 @@ final class YamlFileUpdater {
 
     static YamlConfiguration update(JavaPlugin plugin,
                                     String resourceName,
-                                    Set<String> obsoletePaths,
+                                    int targetSchemaVersion,
+                                    Set<String> addedPaths,
                                     Map<String, Object> exactDefaultReplacements) {
         File file = new File(plugin.getDataFolder(), resourceName);
         if (!file.exists()) {
             plugin.saveResource(resourceName, false);
+            YamlConfiguration created = loadFile(plugin, file);
+            return created == null ? new YamlConfiguration() : created;
         }
 
         YamlConfiguration current = loadFile(plugin, file);
@@ -36,36 +41,37 @@ final class YamlFileUpdater {
             return current;
         }
 
-        boolean changed = false;
-        for (String path : obsoletePaths) {
-            if (current.isSet(path)) {
-                current.set(path, null);
-                changed = true;
-            }
+        if (migrate(current, defaults, targetSchemaVersion, addedPaths, exactDefaultReplacements)) {
+            saveWithBackup(plugin, file, current, targetSchemaVersion);
+        }
+        return current;
+    }
+
+    static boolean migrate(YamlConfiguration current,
+                           YamlConfiguration defaults,
+                           int targetSchemaVersion,
+                           Set<String> addedPaths,
+                           Map<String, Object> exactDefaultReplacements) {
+        int currentVersion = current.getInt("schema-version", 0);
+        if (currentVersion >= targetSchemaVersion) {
+            return false;
         }
 
+        boolean changed = false;
         for (Map.Entry<String, Object> entry : exactDefaultReplacements.entrySet()) {
             String path = entry.getKey();
             Object oldDefault = entry.getValue();
-            if (oldDefault.equals(current.get(path))) {
+            if (oldDefault.equals(current.get(path)) && defaults.isSet(path)) {
                 current.set(path, defaults.get(path));
                 changed = true;
             }
         }
 
-        changed |= copyMissingDefaults(current, defaults);
-        changed |= copyMissingComments(current, defaults);
-
-        if (changed) {
-            save(plugin, file, current);
-        }
-        return current;
-    }
-
-    private static boolean copyMissingDefaults(YamlConfiguration current, YamlConfiguration defaults) {
-        boolean changed = false;
-        for (String path : defaults.getKeys(true)) {
+        for (String path : addedPaths) {
             if (current.isSet(path)) {
+                continue;
+            }
+            if (!defaults.isSet(path)) {
                 continue;
             }
             Object value = defaults.get(path);
@@ -76,33 +82,8 @@ final class YamlFileUpdater {
             }
             changed = true;
         }
-        return changed;
-    }
-
-    private static boolean copyMissingComments(YamlConfiguration current, YamlConfiguration defaults) {
-        boolean changed = false;
-        if (current.options().getHeader().isEmpty() && !defaults.options().getHeader().isEmpty()) {
-            current.options().setHeader(defaults.options().getHeader());
-            changed = true;
-        }
-        if (current.options().getFooter().isEmpty() && !defaults.options().getFooter().isEmpty()) {
-            current.options().setFooter(defaults.options().getFooter());
-            changed = true;
-        }
-        for (String path : defaults.getKeys(true)) {
-            List<String> comments = defaults.getComments(path);
-            if (!comments.isEmpty() && current.getComments(path).isEmpty()) {
-                current.setComments(path, comments);
-                changed = true;
-            }
-
-            List<String> inlineComments = defaults.getInlineComments(path);
-            if (!inlineComments.isEmpty() && current.getInlineComments(path).isEmpty()) {
-                current.setInlineComments(path, inlineComments);
-                changed = true;
-            }
-        }
-        return changed;
+        current.set("schema-version", targetSchemaVersion);
+        return true;
     }
 
     private static YamlConfiguration loadFile(JavaPlugin plugin, File file) {
@@ -130,15 +111,39 @@ final class YamlFileUpdater {
             configuration.load(reader);
         } catch (IOException | InvalidConfigurationException exception) {
             plugin.getLogger().warning("Could not load bundled " + resourceName + ": " + exception.getMessage());
+            return null;
         }
         return configuration;
     }
 
-    private static void save(JavaPlugin plugin, File file, YamlConfiguration configuration) {
+    private static void saveWithBackup(JavaPlugin plugin, File file, YamlConfiguration configuration, int targetSchemaVersion) {
+        File backup = new File(file.getParentFile(), file.getName() + ".pre-gui-v" + targetSchemaVersion + ".bak");
+        File temporary = new File(file.getParentFile(), file.getName() + ".tmp");
+        boolean backupCreated = false;
         try {
-            configuration.save(file);
+            if (!backup.exists()) {
+                Files.copy(file.toPath(), backup.toPath(), StandardCopyOption.COPY_ATTRIBUTES);
+                backupCreated = true;
+            }
+            Files.writeString(temporary.toPath(), configuration.saveToString(), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException exception) {
             plugin.getLogger().warning("Could not update " + file.getName() + ": " + exception.getMessage());
+            if (backupCreated && backup.exists()) {
+                try {
+                    Files.copy(backup.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+                    plugin.getLogger().warning("Restored " + file.getName() + " from " + backup.getName() + ".");
+                } catch (IOException rollbackException) {
+                    plugin.getLogger().severe("Could not restore " + file.getName() + " from backup: " + rollbackException.getMessage());
+                }
+            }
+            if (temporary.exists() && !temporary.delete()) {
+                plugin.getLogger().warning("Could not remove temporary GUI file " + temporary.getName());
+            }
         }
     }
 }

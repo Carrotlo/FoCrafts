@@ -14,3 +14,9 @@ body-width: 300
 input-width: 300
 button-width: 100
 max-length: 128
+placeholder: "{format}"
+confirm-icon: "spyglass"
+cancel-icon: "barrier"
+label-visible: true
+can-close-with-escape: true
+pause: false

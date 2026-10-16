@@ -34,12 +34,12 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
 
         if (commandName.equals("craft")) {
             if (!(sender instanceof Player player)) {
-                messages.send(sender, "player-only");
+                messages.send(sender, "player-only", "");
                 return true;
             }
             if (!hasUsePermission(player)) {
-                messages.send(sender, "no-permission");
-                plugin.getAdminSounds().updateError(sender);
+                messages.send(sender, "no-permission", "");
+                plugin.getGuiSounds().error(player);
                 return true;
             }
             guiManager.openCraftGui(player);
@@ -48,12 +48,12 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
 
         if (commandName.equals("recipes")) {
             if (!(sender instanceof Player player)) {
-                messages.send(sender, "player-only");
+                messages.send(sender, "player-only", "");
                 return true;
             }
             if (!hasUsePermission(player)) {
-                messages.send(player, "no-permission");
-                plugin.getAdminSounds().updateError(sender);
+                messages.send(player, "no-permission", "");
+                plugin.getGuiSounds().error(player);
                 return true;
             }
             guiManager.openRecipeListGui(player, 0);
@@ -62,7 +62,7 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
 
         if (commandName.equals("focraftsadmin")) {
             if (!sender.hasPermission("focrafts.admin")) {
-                messages.send(sender, "no-permission");
+                messages.send(sender, "no-permission", "");
                 plugin.getAdminSounds().updateError(sender);
                 return true;
             }
@@ -80,7 +80,7 @@ public final class FoCraftsCommand implements CommandExecutor, TabCompleter {
 
             if (args[0].equalsIgnoreCase("editor")) {
                 if (!(sender instanceof Player player)) {
-                    messages.send(sender, "player-only");
+                    messages.send(sender, "player-only", "");
                     return true;
                 }
                 plugin.getEditorSounds().open(player);

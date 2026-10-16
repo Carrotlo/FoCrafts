@@ -16,8 +16,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public final class FoCraftsTextInputFallback implements TextInputFallback, AutoCloseable {
-    private static final String CANCEL_KEYWORD = "cancel";
-
     private final FoMessageService messages;
     private final Supplier<NativeDialogSupport> supportSupplier;
     private final Map<UUID, ChatSession> sessions = new ConcurrentHashMap<>();
@@ -42,7 +40,7 @@ public final class FoCraftsTextInputFallback implements TextInputFallback, AutoC
         warnPlayerFallback(player);
         sessions.put(player.getUniqueId(), new ChatSession(onSubmit, onCancel));
         String hint = pendingHints.remove(player.getUniqueId());
-        messages.send(player, "chat-prompt-start", "{prefix}{muted}{hint}", Map.of("hint", messages.renderTemplate(chatHint(hint, request), Map.of())));
+        messages.send(player, "chat-prompt-start", "", Map.of("hint", messages.renderTemplate(chatHint(hint, request), Map.of())));
         player.closeInventory();
     }
 
@@ -55,7 +53,7 @@ public final class FoCraftsTextInputFallback implements TextInputFallback, AutoC
         if (session == null) {
             return;
         }
-        if (input.equalsIgnoreCase(CANCEL_KEYWORD)) {
+        if (input.equalsIgnoreCase(messages.render("public-gui.cancel-keyword", ""))) {
             if (session.onCancel() != null) {
                 session.onCancel().run();
             }
@@ -94,12 +92,12 @@ public final class FoCraftsTextInputFallback implements TextInputFallback, AutoC
             return;
         }
         if (warnedPlayers.add(player.getUniqueId())) {
-            messages.send(player, "native-dialogs-fallback", "{prefix}{bad}Native dialogs are not supported on this server. Using chat input.");
+            messages.send(player, "native-dialogs-fallback", "");
         }
     }
 
     private String chatHint(String hint, TextDialogRequest request) {
-        if (hint != null && !hint.isBlank()) {
+        if (hint != null) {
             return hint;
         }
 
