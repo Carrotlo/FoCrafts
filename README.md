@@ -66,6 +66,6 @@ Main config areas: `recipes`, `native-dialogs`.
 <details>
 <summary><strong>Developer API</strong></summary>
 
-This plugin does not expose a public developer API.
+FoCrafts exposes a recipe catalog, validated recipe writer, and two crafting events. See [public API source](src/main/java/me/foesio/foCrafts/api) for discovery, dependency setup, examples, and event timing.
 
 </details>

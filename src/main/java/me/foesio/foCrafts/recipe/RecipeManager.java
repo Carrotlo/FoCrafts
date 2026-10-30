@@ -15,6 +15,11 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,6 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -37,13 +43,14 @@ public final class RecipeManager {
         this.plugin = plugin;
     }
 
-    public void load() {
+    public synchronized void load() {
         if (!plugin.getDataFolder().exists() && !plugin.getDataFolder().mkdirs()) {
             plugin.getLogger().warning("Could not create plugin data folder.");
         }
 
         recipesFile = new File(plugin.getDataFolder(), "recipes.yml");
-        if (!recipesFile.exists()) {
+        boolean freshRecipesFile = !recipesFile.exists();
+        if (freshRecipesFile) {
             plugin.saveResource("recipes.yml", false);
         }
 
@@ -62,7 +69,7 @@ public final class RecipeManager {
             }
         }
 
-        if (recipes.isEmpty()) {
+        if (recipes.isEmpty() && freshRecipesFile) {
             createDefaultRecipe();
         }
 
@@ -70,26 +77,43 @@ public final class RecipeManager {
         save();
     }
 
-    public void save() {
-        if (recipesConfig == null || recipesFile == null) {
-            return;
-        }
+    public synchronized void save() {
+        saveChecked();
+    }
 
-        recipesConfig.set("recipes", null);
-        ConfigurationSection root = recipesConfig.createSection("recipes");
-        for (CustomRecipe recipe : recipes.values()) {
-            ConfigurationSection section = root.createSection(recipe.getId());
-            serializeRecipeIntoSection(section, recipe);
-        }
-
+    private boolean saveChecked() {
+        if (recipesConfig == null || recipesFile == null) return false;
+        Path target = recipesFile.toPath();
+        Path temporary = null;
         try {
-            recipesConfig.save(recipesFile);
-        } catch (IOException exception) {
+            YamlConfiguration next = new YamlConfiguration();
+            next.loadFromString(recipesConfig.saveToString());
+            next.set("recipes", null);
+            ConfigurationSection root = next.createSection("recipes");
+            for (CustomRecipe recipe : recipes.values()) {
+                ConfigurationSection section = root.createSection(recipe.getId());
+                serializeRecipeIntoSection(section, recipe);
+            }
+            temporary = Files.createTempFile(target.getParent(), "recipes-", ".tmp");
+            Files.writeString(temporary, next.saveToString(), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            recipesConfig = next;
+            return true;
+        } catch (IOException | org.bukkit.configuration.InvalidConfigurationException | RuntimeException exception) {
             plugin.getLogger().severe("Could not save recipes.yml: " + exception.getMessage());
+            return false;
+        } finally {
+            if (temporary != null) {
+                try { Files.deleteIfExists(temporary); } catch (IOException | SecurityException ignored) { }
+            }
         }
     }
 
-    public List<CustomRecipe> getEnabledRecipes() {
+    public synchronized List<CustomRecipe> getEnabledRecipes() {
         List<CustomRecipe> list = new ArrayList<>();
         for (CustomRecipe recipe : recipes.values()) {
             if (recipe.isEnabled()) {
@@ -99,7 +123,7 @@ public final class RecipeManager {
         return list;
     }
 
-    public List<CustomRecipe> getAllRecipes() {
+    public synchronized List<CustomRecipe> getAllRecipes() {
         List<CustomRecipe> list = new ArrayList<>();
         for (CustomRecipe recipe : recipes.values()) {
             list.add(recipe.copy());
@@ -107,17 +131,22 @@ public final class RecipeManager {
         return list;
     }
 
-    public Optional<CustomRecipe> getRecipe(String recipeId) {
+    public synchronized Optional<CustomRecipe> getRecipe(String recipeId) {
         CustomRecipe recipe = recipes.get(recipeId);
         return Optional.ofNullable(recipe == null ? null : recipe.copy());
     }
 
-    public void upsert(CustomRecipe recipe) {
+    public synchronized boolean isCurrentRecipe(String recipeId, CustomRecipe expected) {
+        CustomRecipe current = recipes.get(recipeId);
+        return current != null && equivalent(current, expected);
+    }
+
+    public synchronized void upsert(CustomRecipe recipe) {
         recipes.put(recipe.getId(), recipe.copy());
         save();
     }
 
-    public boolean delete(String recipeId) {
+    public synchronized boolean delete(String recipeId) {
         CustomRecipe removed = recipes.remove(recipeId);
         if (removed == null) {
             return false;
@@ -126,7 +155,7 @@ public final class RecipeManager {
         return true;
     }
 
-    public String generateRecipeId() {
+    public synchronized String generateRecipeId() {
         int number = recipes.size() + 1;
         while (recipes.containsKey("recipe_" + number)) {
             number++;
@@ -134,11 +163,11 @@ public final class RecipeManager {
         return "recipe_" + number;
     }
 
-    public String generateRecipeId(String displayName) {
+    public synchronized String generateRecipeId(String displayName) {
         return uniqueRecipeId(baseRecipeId(displayName), null);
     }
 
-    public Optional<CustomRecipe> renameRecipe(String currentRecipeId, String displayName) {
+    public synchronized Optional<CustomRecipe> renameRecipe(String currentRecipeId, String displayName) {
         CustomRecipe recipe = recipes.remove(currentRecipeId);
         if (recipe == null) {
             return Optional.empty();
@@ -150,6 +179,70 @@ public final class RecipeManager {
         save();
         return Optional.of(recipe.copy());
     }
+
+    /** Transactional persistence used by the public writer. Existing editor methods retain their signatures. */
+    public synchronized Mutation writeUpsert(CustomRecipe recipe) {
+        CustomRecipe previous = recipes.get(recipe.getId());
+        if (previous != null && equivalent(previous, recipe)) return Mutation.UNCHANGED;
+        recipes.put(recipe.getId(), recipe.copy());
+        if (saveChecked()) return previous == null ? Mutation.CREATED : Mutation.UPDATED;
+        if (previous == null) recipes.remove(recipe.getId());
+        else recipes.put(previous.getId(), previous);
+        return Mutation.SAVE_FAILED;
+    }
+
+    public synchronized Mutation writeDelete(String recipeId) {
+        Map<String, CustomRecipe> before = new LinkedHashMap<>(recipes);
+        CustomRecipe previous = recipes.remove(recipeId);
+        if (previous == null) return Mutation.NOT_FOUND;
+        if (saveChecked()) return Mutation.DELETED;
+        recipes.clear();
+        recipes.putAll(before);
+        return Mutation.SAVE_FAILED;
+    }
+
+    public synchronized RenameResult writeRename(String oldId, String displayName) {
+        CustomRecipe previous = recipes.get(oldId);
+        if (previous == null) return new RenameResult(Mutation.NOT_FOUND, oldId);
+        String newId = uniqueRecipeId(baseRecipeId(displayName), oldId);
+        if (newId.length() > 64) return new RenameResult(Mutation.INVALID, oldId);
+        if (oldId.equals(newId) && Objects.equals(previous.getDisplayName(), displayName)) {
+            return new RenameResult(Mutation.UNCHANGED, oldId);
+        }
+        Map<String, CustomRecipe> before = new LinkedHashMap<>(recipes);
+        CustomRecipe renamed = previous.copy();
+        renamed.setId(newId);
+        renamed.setDisplayName(displayName);
+        recipes.remove(oldId);
+        recipes.put(newId, renamed);
+        if (saveChecked()) return new RenameResult(Mutation.UPDATED, newId);
+        recipes.clear();
+        recipes.putAll(before);
+        return new RenameResult(Mutation.SAVE_FAILED, oldId);
+    }
+
+    private static boolean equivalent(CustomRecipe left, CustomRecipe right) {
+        RecipeCost a = left.getCost();
+        RecipeCost b = right.getCost();
+        return Objects.equals(left.getId(), right.getId())
+                && Objects.equals(left.getDisplayName(), right.getDisplayName())
+                && left.isEnabled() == right.isEnabled()
+                && left.getType() == right.getType()
+                && Objects.equals(left.getResult(), right.getResult())
+                && Objects.equals(left.getIngredients(), right.getIngredients())
+                && Objects.equals(left.getPermission(), right.getPermission())
+                && Objects.equals(left.getDescription(), right.getDescription())
+                && Objects.equals(left.getDisabledWorlds(), right.getDisabledWorlds())
+                && left.getMatchMode() == right.getMatchMode()
+                && a.getXpLevels() == b.getXpLevels()
+                && a.getXpPoints() == b.getXpPoints()
+                && Double.compare(a.getVaultMoney(), b.getVaultMoney()) == 0
+                && Objects.equals(left.getCraftCommands(), right.getCraftCommands());
+    }
+
+    public enum Mutation { CREATED, UPDATED, UNCHANGED, DELETED, NOT_FOUND, SAVE_FAILED, INVALID }
+
+    public record RenameResult(Mutation mutation, String recipeId) { }
 
     private String uniqueRecipeId(String baseId, String allowedExistingId) {
         String safeBase = baseId == null || baseId.isBlank() ? "recipe" : baseId;
@@ -171,11 +264,11 @@ public final class RecipeManager {
         return normalized.isBlank() ? "recipe" : normalized;
     }
 
-    public RecipeMatch findFirstMatch(ItemStack[] grid) {
+    public synchronized RecipeMatch findFirstMatch(ItemStack[] grid) {
         return findFirstMatch(grid, recipe -> true);
     }
 
-    public RecipeMatch findFirstMatch(ItemStack[] grid, Predicate<CustomRecipe> filter) {
+    public synchronized RecipeMatch findFirstMatch(ItemStack[] grid, Predicate<CustomRecipe> filter) {
         for (CustomRecipe recipe : recipes.values()) {
             if (!recipe.isEnabled() || !filter.test(recipe)) {
                 continue;

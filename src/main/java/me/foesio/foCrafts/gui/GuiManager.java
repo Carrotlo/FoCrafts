@@ -45,6 +45,8 @@ import me.foesio.core.selector.TriStateSelectionState;
 import me.foesio.core.selector.TriStateSelections;
 import me.foesio.core.selector.WorldSelectionEntries;
 import me.foesio.foCrafts.FoCrafts;
+import me.foesio.foCrafts.api.event.FoCraftsCraftCompletedEvent;
+import me.foesio.foCrafts.api.event.FoCraftsPreCraftEvent;
 import me.foesio.foCrafts.input.FoCraftsTextInputFallback;
 import me.foesio.foCrafts.model.CustomRecipe;
 import me.foesio.foCrafts.model.RecipeCost;
@@ -1001,7 +1003,7 @@ public final class GuiManager implements Listener {
 
         if (raw == holder.resultSlot()) {
             int amount = event.isShiftClick() ? Integer.MAX_VALUE : 1;
-            CraftAttempt attempt = attemptCraft(player, top, amount);
+            CraftAttempt attempt = attemptCraft(event, player, top, amount);
             if (attempt.crafted > 0) {
                 plugin.getSounds().play(player, "craft.success");
                 messages.send(player, "craft-success", "", Map.of("amount", formatPublicNumber(attempt.crafted)));
@@ -1501,7 +1503,7 @@ public final class GuiManager implements Listener {
         }
     }
 
-    private CraftAttempt attemptCraft(Player player, Inventory inventory, int desiredCrafts) {
+    private CraftAttempt attemptCraft(InventoryClickEvent source, Player player, Inventory inventory, int desiredCrafts) {
         CraftHolder gui = (CraftHolder) inventory.getHolder();
         List<Integer> gridSlots = gui.gridSlots();
         ItemStack[] grid = readGrid(inventory, gridSlots);
@@ -1538,20 +1540,42 @@ public final class GuiManager implements Listener {
                 break;
             }
 
-            if (!consumeOneCraft(inventory, match, gridSlots)) {
+            FoCraftsPreCraftEvent preCraft = new FoCraftsPreCraftEvent(
+                    player, recipe.getId(), recipe.getResult(), source.isAsynchronous());
+            Bukkit.getPluginManager().callEvent(preCraft);
+            if (preCraft.isCancelled()) {
+                if (crafted == 0) return new CraftAttempt(0, "", Map.of());
                 break;
             }
-
-            if (!chargeCost(player, recipe.getCost())) {
-                restoreOneCraftInputs(inventory, match, gridSlots);
-                if (crafted == 0) {
-                    return new CraftAttempt(0, "craft-cost-failed", Map.of());
+            ItemStack result;
+            synchronized (recipeManager) {
+                if (!recipeManager.isCurrentRecipe(recipe.getId(), recipe) || !canCraftRecipe(player, recipe)) {
+                    if (crafted == 0) return new CraftAttempt(0, "craft-no-match", Map.of());
+                    break;
                 }
-                break;
-            }
+                CostCheck afterEventCost = checkCost(player, recipe.getCost());
+                if (!afterEventCost.ok) {
+                    if (crafted == 0) return new CraftAttempt(0, afterEventCost.messageKey, afterEventCost.placeholders);
+                    break;
+                }
 
-            ItemStack result = recipe.getResult();
-            giveResult(player, result);
+                if (!consumeOneCraft(inventory, match, gridSlots)) {
+                    break;
+                }
+
+                if (!chargeCost(player, recipe.getCost())) {
+                    restoreOneCraftInputs(inventory, match, gridSlots);
+                    if (crafted == 0) {
+                        return new CraftAttempt(0, "craft-cost-failed", Map.of());
+                    }
+                    break;
+                }
+
+                result = recipe.getResult();
+                giveResult(player, result);
+            }
+            Bukkit.getPluginManager().callEvent(new FoCraftsCraftCompletedEvent(
+                    player, recipe.getId(), result, source.isAsynchronous()));
             executeCraftCommands(player, recipe, result.getAmount());
             crafted++;
         }
@@ -1715,9 +1739,9 @@ public final class GuiManager implements Listener {
             ));
         }
 
-        int currentTotalExperience = getTotalExperience(player);
-        int levelCostInPoints = expCostForLevelDrop(player.getLevel(), levels);
-        int requiredTotalPoints = Math.max(0, points + levelCostInPoints);
+        long currentTotalExperience = getTotalExperience(player);
+        long levelCostInPoints = expCostForLevelDrop(player.getLevel(), levels);
+        long requiredTotalPoints = Math.max(0L, (long) points + levelCostInPoints);
         if (requiredTotalPoints > 0 && currentTotalExperience < requiredTotalPoints) {
             return new CostCheck(false, "craft-cost-xp", Map.of(
                     "levels", formatPublicNumber(levels),
@@ -1759,14 +1783,14 @@ public final class GuiManager implements Listener {
         return true;
     }
 
-    private int getTotalExperience(Player player) {
+    private long getTotalExperience(Player player) {
         int level = player.getLevel();
         float progress = player.getExp();
-        int toLevel = xpToNextLevel(level);
-        return totalExperienceAtLevel(level) + Math.round(progress * toLevel);
+        long toLevel = xpToNextLevel(level);
+        return totalExperienceAtLevel(level) + Math.round(progress * (double) toLevel);
     }
 
-    private int expCostForLevelDrop(int currentLevel, int levelsToDrop) {
+    private long expCostForLevelDrop(int currentLevel, int levelsToDrop) {
         if (levelsToDrop <= 0 || currentLevel <= 0) {
             return 0;
         }
@@ -1774,27 +1798,28 @@ public final class GuiManager implements Listener {
         return totalExperienceAtLevel(currentLevel) - totalExperienceAtLevel(targetLevel);
     }
 
-    private int totalExperienceAtLevel(int level) {
+    private long totalExperienceAtLevel(int level) {
         if (level <= 16) {
             return level * level + (6 * level);
         }
         if (level <= 31) {
             return (int) Math.floor(2.5 * level * level - 40.5 * level + 360);
         }
-        return (int) Math.floor(4.5 * level * level - 162.5 * level + 2220);
+        return (long) Math.floor(4.5 * level * (double) level - 162.5 * level + 2220);
     }
 
-    private int xpToNextLevel(int level) {
+    private long xpToNextLevel(int level) {
         if (level <= 15) {
             return 2 * level + 7;
         }
         if (level <= 30) {
             return 5 * level - 38;
         }
-        return 9 * level - 158;
+        return 9L * level - 158;
     }
 
     private void sendCraftFailure(Player player, CraftAttempt attempt) {
+        if ("".equals(attempt.messageKey)) return;
         if (attempt.messageKey == null) {
             messages.send(player, "craft-no-match", "");
             return;

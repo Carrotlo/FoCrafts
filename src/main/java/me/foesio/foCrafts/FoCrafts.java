@@ -14,12 +14,16 @@ import me.foesio.core.sound.FoGuiSounds;
 import me.foesio.core.sound.FoSoundService;
 import me.foesio.core.update.UpdateNoticeService;
 import me.foesio.foCrafts.command.FoCraftsCommand;
+import me.foesio.foCrafts.api.RecipeCatalog;
+import me.foesio.foCrafts.api.RecipeWriter;
 import me.foesio.foCrafts.gui.GuiManager;
 import me.foesio.foCrafts.gui.PublicGuiOwnerMigration;
 import me.foesio.foCrafts.recipe.RecipeManager;
+import me.foesio.foCrafts.recipe.RecipeApiService;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.configuration.file.YamlConfiguration;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -41,6 +45,7 @@ public final class FoCrafts extends JavaPlugin {
     private FoGuiSounds guiSounds;
     private UpdateNoticeService updateNotices;
     private RecipeManager recipeManager;
+    private RecipeApiService recipeApiService;
     private FoMessageService messageService;
     private GuiManager guiManager;
     private VaultEconomyBridge vaultEconomy;
@@ -66,6 +71,9 @@ public final class FoCrafts extends JavaPlugin {
         this.vaultEconomy = core.createVaultEconomy();
         this.guiManager = new GuiManager(this, recipeManager, messageService, vaultEconomy,
                 this::getCore);
+        this.recipeApiService = new RecipeApiService(this, recipeManager);
+        getServer().getServicesManager().register(RecipeCatalog.class, recipeApiService, this, ServicePriority.Normal);
+        getServer().getServicesManager().register(RecipeWriter.class, recipeApiService, this, ServicePriority.Normal);
 
         FoCraftsCommand commandHandler = new FoCraftsCommand(this, guiManager, messageService, updateNotices);
         registerCommand("craft", commandHandler);
@@ -77,6 +85,11 @@ public final class FoCrafts extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (recipeApiService != null) {
+            getServer().getServicesManager().unregister(RecipeCatalog.class, recipeApiService);
+            getServer().getServicesManager().unregister(RecipeWriter.class, recipeApiService);
+        }
+        recipeApiService = null;
         if (guiManager != null) {
             guiManager.closePublicGuis();
         }
