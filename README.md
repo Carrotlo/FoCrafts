@@ -66,11 +66,7 @@ Main config areas: `recipes`, `native-dialogs`.
 <details>
 <summary><strong>Developer API</strong></summary>
 
-FoCrafts 2.2 exposes `RecipeCatalog` and `RecipeWriter` through Bukkit's service registry. Compile against the matching FoCrafts jar with `provided` scope (or `compileOnly` in Gradle); do not shade it into a consumer plugin. The source project coordinates are `me.foesio:FoCrafts:2.2`. Obtain the matching jar from this project's build or install it into your local Maven repository; these coordinates do not imply a public Maven repository.
-
-For a required integration, add `depend: [FoCrafts]` to the consumer's `plugin.yml`. For an optional integration, use `softdepend: [FoCrafts]`, check that FoCrafts is enabled before loading a class with direct FoCrafts references, and handle a missing service. Reacquire services after provider disable/enable; a cached service reports unavailable after disable. Paper-plugin consumers need a server dependency on FoCrafts with classpath access enabled.
-
-For an optional consumer, keep direct `me.foesio.foCrafts.api` references in a separate integration class. Only construct that class after `getServer().getPluginManager().isPluginEnabled("FoCrafts")` returns true.
+Compile against the matching jar (`provided` in Maven, `compileOnly` in Gradle); install it locally if needed. Declare `FoCrafts` in your plugin metadata (`softdepend` for an optional integration).
 
 ```xml
 <dependency>
@@ -82,80 +78,27 @@ For an optional consumer, keep direct `me.foesio.foCrafts.api` references in a s
 ```
 
 ```java
-RegisteredServiceProvider<RecipeCatalog> registration =
-        Bukkit.getServicesManager().getRegistration(RecipeCatalog.class);
-if (registration != null) {
-    RecipeCatalog catalog = registration.getProvider();
-    catalog.recipe("starter_wand").ifPresent(recipe ->
-            getLogger().info(recipe.displayName()));
-    // Call availability(player, id) on that player's owning server thread.
-}
-```
+import me.foesio.foCrafts.api.RecipeCatalog;
+import me.foesio.foCrafts.api.event.FoCraftsCraftCompletedEvent;
 
-`RecipeCatalog.recipes()` and `recipe(id)` return detached data from the currently loaded catalog, including disabled recipes. `RecipeData` copies its result and ingredient stacks on input and output. `availability(player, id)` checks whether the loaded recipe is enabled, has an output, passes its recipe permission, and is allowed in the player's world. It does not check `/craft` entry permission, ingredients, XP, Vault balance, or whether a future craft will succeed. Query and write methods must be called from server event/scheduler execution, never an asynchronous worker; `availability` must run on the player's owning thread.
-
-`RecipeWriter.upsert(RecipeData)` creates or updates a recipe by ID. An enabled recipe requires a valid output and at least one valid ingredient; IDs are letters/numbers with `_` or `-` (1–64 characters). `delete(id)` removes one, including the last recipe without recreating a default on reload. `rename(id, displayName)` changes the display name and generates a unique ID using the admin editor's slug rule, subject to the API ID length limit. The result status is `CREATED`, `UPDATED`, `UNCHANGED`, `DELETED`, `NOT_FOUND`, `INVALID`, `SAVE_FAILED`, or `UNAVAILABLE`. Successful changes are saved to `recipes.yml` before the call returns; a save failure rolls the in-memory API change back. `UNCHANGED` and `NOT_FOUND` do not write. These writes are administrative operations by trusted plugins and do not check a player's permission. They do not fire a recipe-change event.
-
-```java
-RegisteredServiceProvider<RecipeWriter> registration =
-        Bukkit.getServicesManager().getRegistration(RecipeWriter.class);
-if (registration != null) {
-    RecipeWriteResult outcome = registration.getProvider().delete("old_recipe");
-    getLogger().info(outcome.status().name());
-}
-```
-
-### Craft events
-
-`FoCraftsPreCraftEvent` is cancellable. It fires once for each affordable matched craft in FoCrafts' crafting GUI, after a cost check but before ingredients or costs are taken. Cancelling it stops that craft without those effects; earlier crafts in the same shift click remain complete. FoCrafts sends no failure message for a cancelled first craft, so a vetoing listener may send its own explanation. The recipe ID and copied result are read-only; changing the returned item does not change the output. FoCrafts rechecks the loaded recipe, eligibility, and cost after listeners return; a recipe changed during the event will not be crafted from a stale definition.
-
-`FoCraftsCraftCompletedEvent` is informational. It fires once per completed craft after ingredients and costs are taken and the result is given or dropped, before configured `on-craft.commands` run. Failed, blocked, and cancelled attempts do not fire it. A shift click that crafts three times fires three completion events. The result getter returns a copy.
-
-Both events are dispatched inline from the inventory click on that player's owning server execution thread. Their Bukkit asynchronous flag follows the source inventory event; listeners should schedule later work according to the server's thread model and must not assume that every regionized server callback is on one global main thread.
-
-```java
-@EventHandler
-public void onCraft(FoCraftsCraftCompletedEvent event) {
-    String recipeId = event.getRecipeId();
-    Player player = event.getPlayer();
-    // Award one unit of quest progress for this completed craft.
-}
+RecipeCatalog api = Bukkit.getServicesManager().load(RecipeCatalog.class);
+if (api != null) api.recipes();
 
 @EventHandler
-public void beforeCraft(FoCraftsPreCraftEvent event) {
-    if (blockedForPlayer(event.getPlayer(), event.getRecipeId())) {
-        event.setCancelled(true);
-    }
+public void onFoCraftsCraftCompletedEvent(FoCraftsCraftCompletedEvent event) {
+    Bukkit.getLogger().info(event.getClass().getSimpleName());
 }
 ```
 
-The event classes and service types are in `me.foesio.foCrafts.api` and `me.foesio.foCrafts.api.event`. Their public signatures contain Bukkit and FoCrafts types, never FoPluginCore types. FoPluginCore is shaded and relocated inside FoCrafts.
+**API methods** (overloads grouped):
 
-### Complete public API method index
+- `RecipeCatalog`: `recipes`, `recipe`, `availability`.
+- `RecipeWriter`: `upsert`, `delete`, `rename`.
 
-Signatures use short type names; import Fo types from this plugin's `api` package and Bukkit types from Bukkit.
+**Other API types:** `RecipeAvailability`, `RecipeData`, `RecipeWriteResult`.
 
-#### `RecipeCatalog`
+**Events:** `FoCraftsCraftCompletedEvent`, `FoCraftsPreCraftEvent`.
 
-```java
-List<RecipeData> recipes();
-Optional<RecipeData> recipe(String);
-RecipeAvailability availability(Player, String);
-```
-
-#### `RecipeWriter`
-
-```java
-RecipeWriteResult upsert(RecipeData);
-RecipeWriteResult delete(String);
-RecipeWriteResult rename(String, String);
-```
-
-**Other public contract types:** `RecipeAvailability`, `RecipeData`, `RecipeWriteResult`.
-
-### Complete Bukkit event index
-
-- `FoCraftsCraftCompletedEvent`.
-- `FoCraftsPreCraftEvent`.
+[Browse API source](src/main/java/me/foesio/foCrafts/api) for signatures and event details.
 
 </details>
